@@ -30,10 +30,8 @@ import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolIterator;
-import ghidra.program.util.ContextEvaluatorAdapter;
 import ghidra.program.util.VarnodeContext;
 import ghidra.util.exception.CancelledException;
-import ghidra.util.exception.NotFoundException;
 
 public class PcodeExtractor extends GhidraScript {
 	
@@ -70,10 +68,7 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected Term<Program> iterateFunctions(Term<Program> program, FunctionManager funcMan, SimpleBlockModel simpleBM, Listing listing, VarnodeContext nodeContxt) {
 		/*
-		 * 
-		 * Uses the function iterator to create sub terms for each functions and calls the block iterator to add all
-		 * data to each corresponding sub (e.g. blk -> def/jmps)
-		 * 
+		 * Iterates over functions to create sub terms and calls the block iterator to add all block terms to each subroutine.
 		 * */
 		FunctionIterator functions = funcMan.getFunctionsNoStubs(true);
 		for(Function func : functions) {
@@ -90,9 +85,7 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected Vector<Term<Blk>> iterateBlocks(Term<Sub> currentSub, SimpleBlockModel simpleBM, Listing listing, VarnodeContext nodeContxt) {
 		/*
-		 * 
-		 * Iterates over all blocks and calls instruction iterator to add def and jmp terms to each block
-		 * 
+		 * Iterates over all blocks and calls the instruction iterator to add def and jmp terms to each block.
 		 * */
 		Vector<Term<Blk>> blocks = new Vector<Term<Blk>>();
 		try {
@@ -113,9 +106,7 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected Term<Blk> iterateInstructions(Term<Blk> block, InstructionIterator instructions, VarnodeContext nodeContxt) {
 		/*
-		 * 
-		 * iterate over pcode instructions and add either jmp or def term depending on the mnemonic
-		 * 
+		 * Iterates over pcode instructions and adds either jmp or def term depending on the mnemonic.
 		 * */
 		int pCodeCount = 0;
 		for (Instruction instr : instructions) {
@@ -138,6 +129,9 @@ public class PcodeExtractor extends GhidraScript {
 	
 	
 	protected Project createProject(Term<Program> program) {
+		/*
+		 * Creates the project object and adds the stack pointer register and program term.
+		 * */
 		Project project = new Project();
 		CompilerSpec comSpec = currentProgram.getCompilerSpec();
 		Register stackPointerRegister = comSpec.getStackPointer();
@@ -151,7 +145,7 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected Term<Program> createProgramTerm(FunctionManager funcMan, ghidra.program.model.listing.Program program, VarnodeContext nodeContxt) {
 		/*
-		 * set id to program's minimal address
+		 * Creates the project term with an unique TID and adds external symbols.
 		 * */
 		Tid progTid = new Tid(String.format("prog_%s", program.getMinAddress().toString()), program.getMinAddress().toString());
 		Vector<ExternSymbol> externalSymbols = new Vector<ExternSymbol>();
@@ -166,7 +160,7 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected ExternSymbol createExternSymbol(ghidra.program.model.listing.Program program, FunctionManager funcMan, Symbol symbol, VarnodeContext nodeContxt) {
 		/*
-		 * 
+		 * Creates an external symbol with an unique TID, a calling convention and argument objects.
 		 * */
 		Symbol libSym = getInternalCaller(program, funcMan, symbol);
 		Tid tid = new Tid(String.format("sub_%s", libSym.getAddress().toString()), libSym.getAddress().toString());
@@ -177,6 +171,9 @@ public class PcodeExtractor extends GhidraScript {
 	
 	
 	protected Symbol getInternalCaller(ghidra.program.model.listing.Program program, FunctionManager funcMan, Symbol symbol) {
+		/*
+		 * Gets the internally called Thunk Function for an external symbol.
+		 * */
 		SymbolIterator symDefined = program.getSymbolTable().getDefinedSymbols();
 		Symbol candidate = symbol;
 		while(symDefined.hasNext()) {
@@ -192,6 +189,10 @@ public class PcodeExtractor extends GhidraScript {
 	
 	
 	protected Boolean isThunkFunctionRef(Symbol def, FunctionManager funcMan) {
+		/*
+		 * Checks if current external symbol is referenced by a Thunk Function.
+		 * If so, the Thunk Function is the internally called function.
+		 * */
 		Address refAddr = def.getReferences()[0].getFromAddress();
 		if(funcMan.getFunctionContaining(refAddr) != null && funcMan.getFunctionContaining(refAddr).isThunk()) {
 			return true;
@@ -201,6 +202,9 @@ public class PcodeExtractor extends GhidraScript {
 	
 	
 	protected Vector<Arg> createArguments(FunctionManager funcMan, Symbol symbol, VarnodeContext nodeContxt) {
+		/*
+		 * Creates Arguments for the ExternSymbol object.
+		 * */
 		Vector<Arg> args = new Vector<Arg>();
 		Function func = funcMan.getFunctionAt(symbol.getAddress());
 		Parameter[] params = func.getParameters();
@@ -216,6 +220,9 @@ public class PcodeExtractor extends GhidraScript {
 	
 	
 	protected Arg specifyArg(Parameter param, VarnodeContext nodeContxt) {
+		/*
+		 * Specifies if the argument is a stack variable or a register,
+		 * */
 		Arg arg = new Arg();
 		if(param.isStackVariable()) {
 			Variable stackVar = createVariable(param.getFirstStorageVarnode(), nodeContxt);
@@ -232,8 +239,7 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected Term<Sub> createSubTerm(Function func) {
 		/*
-		 * set each subroutine Tid to n.0.0 where n = subCount and set the address to the function's entry point
-		 * create new Blk vector
+		 * Creates a Sub Term with an unique TID consisting of the prefix sub and its entry address.
 		 * */
 		Tid subTid = new Tid(String.format("sub_%s", func.getEntryPoint().toString()), func.getEntryPoint().toString());
 		return new Term<Sub>(subTid, new Sub(func.getName(), func.getBody()));
@@ -242,8 +248,7 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected Term<Blk> createBlkTerm(CodeBlock block) {
 		/*
-		 * set each block Tid to n.m.0 where n = subCount, m = blkCount and set the address to the first entry address of the block
-		 * create new Def and Jmp vectors
+		 * Creates a Blk Term with an unique TID consisting of the prefix blk and its entry address.
 		 * */
 		Tid blkTid = new Tid(String.format("blk_%s", block.getFirstStartAddress().toString()), block.getFirstStartAddress().toString());
 		return new Term<Blk>(blkTid, new Blk(new Vector<Term<Def>>(), new Vector<Term<Jmp>>()));
@@ -252,8 +257,8 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected Term<Jmp> createJmpTerm(Instruction instr, int pCodeCount, PcodeOp pcodeOp, String mnemonic, Address instrAddr, VarnodeContext nodeContxt) {
 		/*
-		 * set each jmp Tid to n.m.p where n = subCount, m = blkCount, p = jmpCount
-		 * TODO: process jmpKind
+		 * Creates a Jmp Term with an unique TID consisting of the prefix jmp, its instruction address and the index of the pcode in the block.
+		 * Depending on the instruction, it either has a goto label, a goto label and a condition or a call object.
 		 * */
 		Tid jmpTid = new Tid(String.format("instr_%s_%s", instrAddr.toString(), pCodeCount), instrAddr.toString());
 		if(mnemonic.equals("CBRANCH")) {
@@ -270,7 +275,7 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected Term<Def> createDefTerm(int pCodeCount, PcodeOp pcodeOp, Address instrAddr, VarnodeContext nodeContxt) {
 		/*
-		 * set each jmp Tid to n.m.p where n = subCount, m = blkCount, p = instrCount
+		 * Creates a Def Term with an unique TID consisting of the prefix def, its instruction address and the index of the pcode in the block.
 		 * */
 		Tid defTid = new Tid(String.format("instr_%s_%s", instrAddr.toString(), pCodeCount), instrAddr.toString());
 		if(pcodeOp.getMnemonic().equals("STORE")) {
@@ -284,41 +289,42 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected Variable createVariable(Varnode node, VarnodeContext nodeContxt) {
 		/*
-		 * Set register name based on being a register, virtual register or ram address
-		 * In case it is a virtual register, set 
-		 * 
+		 * Set register name based on being a register, virtual register, constant or ram address.
+		 * In case it is a virtual register, prefix the name with $U.
+		 * In case it is a constant, remove the const prefix from the constant.
 		 * */
 		Variable var = new Variable();
 		if(node.isRegister()) {
 			var.setName(getRegisterMnemonic(nodeContxt, node));
-			var.setSize(node.getSize());
 			var.setIsVirtual(false);
 		} 
 		else if (node.isUnique()) {
 			var.setName(renameVirtualRegister(node.getAddress().toString()));
-			var.setSize(node.getSize());
 			var.setIsVirtual(true);
 		}
 		else if (node.isConstant()) {
 			var.setName(removeConstantPrefix(node.getAddress().toString()));
-			var.setSize(node.getSize());
 			var.setIsVirtual(false);
 		}
 		else if (node.isAddress()) {
 			var.setName(node.getAddress().toString());
-			var.setSize(node.getSize());
 			var.setIsVirtual(false);
 		}
 		else if(node.isFree()) {
 			var.setName(node.getAddress().toString());
-			var.setSize(node.getSize());
 			var.setIsVirtual(false);
 		}
+		
+		var.setSize(node.getSize());
+		
 		return var;
 	}
 	
 	
 	protected Expression createExpression(PcodeOp pcodeOp, VarnodeContext cntxt) {
+		/*
+		 * Create an Expression using the input varnodes of the pcode instruction.
+		 * */
 		String mnemonic = pcodeOp.getMnemonic();
 		List<Variable> in = new ArrayList<Variable>();
 		
@@ -341,6 +347,10 @@ public class PcodeExtractor extends GhidraScript {
 	
 	
 	protected Label createLabel(String mnemonic, PcodeOp pcodeOp, VarnodeContext nodeContxt, @Nullable Address fallThrough) {
+		/*
+		 * Create a Label based on the branch instruction. For indirect branches and calls, it consists of an Expression, for calls of a sub TID
+		 * and for branches of a blk TID.
+		 * */
 		if (fallThrough == null) {
 			if (mnemonic.equals("CALLIND") || mnemonic.equals("BRANCHIND") || mnemonic.equals("RETURN")) {
 				return new Label(new Expression(mnemonic, createVariable(pcodeOp.getInput(0), nodeContxt)));
@@ -360,34 +370,33 @@ public class PcodeExtractor extends GhidraScript {
 	
 	
 	protected Call createCall(Instruction instr, String mnemonic, PcodeOp pcodeOp, VarnodeContext nodeContxt) {
+		/*
+		 * Creates a Call object, using a target and return Label.
+		 * */
 		return new Call(createLabel(mnemonic, pcodeOp, nodeContxt, null), createLabel(mnemonic, pcodeOp, nodeContxt, instr.getFallThrough()));
 	}
 	
 	
 	protected String renameVirtualRegister(String address) {
+		/*
+		 * Prefixes virtual register with $U.
+		 * */
 		return "$U" + address.replaceFirst("^(unique:0+(?!$))", "");
 	}
 	
 	
 	protected String getRegisterMnemonic(VarnodeContext context, Varnode node) {
+		/*
+		 * Gets register name.
+		 * */
 		return context.getRegister(node).getName();
 	}
 	
 	
-	protected long getNodeConstant(VarnodeContext context, Varnode node) {
-		long constant = 0;
-		ContextEvaluatorAdapter conEval = new ContextEvaluatorAdapter();
-        try {
-        	constant = context.getConstant(node, conEval);
-		} catch(NotFoundException e) {
-			System.out.printf("Could not find constant! %s", e);
-		}
-        
-        return constant;
-	}
-	
-	
 	protected String removeConstantPrefix(String constant) {
+		/*
+		 * Removes the consts prefix from the constant.
+		 * */
 		return constant.replaceFirst("^(const:)", "");
 	}
 	
