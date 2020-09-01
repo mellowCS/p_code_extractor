@@ -63,8 +63,7 @@ public class PcodeExtractor extends GhidraScript {
 		
 		String jsonPath = getScriptArgs()[0];
 		Serializer ser = new Serializer(project, jsonPath);
-		ser.serializeProject();
-		
+	    ser.serializeProject();
 
 	}
 	
@@ -156,38 +155,78 @@ public class PcodeExtractor extends GhidraScript {
 		 * */
 		Tid progTid = new Tid(String.format("prog_%s", program.getMinAddress().toString()), program.getMinAddress().toString());
 		Vector<ExternSymbol> externalSymbols = new Vector<ExternSymbol>();
-		SymbolIterator symIt = program.getSymbolTable().getExternalSymbols();
-		while(symIt.hasNext()) {
-			externalSymbols.add(createExternSymbol(funcMan, symIt.next(), nodeContxt));
+		SymbolIterator symExtern = program.getSymbolTable().getExternalSymbols();
+		while(symExtern.hasNext()) {
+			Symbol ex = symExtern.next();
+			externalSymbols.add(createExternSymbol(program, funcMan, ex, nodeContxt));
 		}
 		return new Term<Program>(progTid, new Program(new Vector<Term<Sub>>(), externalSymbols));
 	}
 	
 	
-	protected ExternSymbol createExternSymbol(FunctionManager funcMan, Symbol symbol, VarnodeContext nodeContxt) {
+	protected ExternSymbol createExternSymbol(ghidra.program.model.listing.Program program, FunctionManager funcMan, Symbol symbol, VarnodeContext nodeContxt) {
 		/*
 		 * 
 		 * */
-		Tid tid = new Tid(String.format("sub_%s", symbol.getAddress().toString()), symbol.getAddress().toString());
+		Symbol libSym = getInternalCaller(program, funcMan, symbol);
+		Tid tid = new Tid(String.format("sub_%s", libSym.getAddress().toString()), libSym.getAddress().toString());
+		Vector<Arg> args = createArguments(funcMan, libSym, nodeContxt);
+		return new ExternSymbol(tid, libSym.getAddress().toString(), libSym.getName(), funcMan.getDefaultCallingConvention().getName(), args);
+		
+	}
+	
+	
+	protected Symbol getInternalCaller(ghidra.program.model.listing.Program program, FunctionManager funcMan, Symbol symbol) {
+		SymbolIterator symDefined = program.getSymbolTable().getDefinedSymbols();
+		Symbol candidate = symbol;
+		while(symDefined.hasNext()) {
+			Symbol def = symDefined.next();
+			if(def.getName().equals(symbol.getName()) && !def.isExternal()) {
+				if(!isThunkFunctionRef(def, funcMan)) {
+					candidate = def;
+				}
+			}
+		}
+		return candidate;
+	}
+	
+	
+	protected Boolean isThunkFunctionRef(Symbol def, FunctionManager funcMan) {
+		Address refAddr = def.getReferences()[0].getFromAddress();
+		if(funcMan.getFunctionContaining(refAddr) != null && funcMan.getFunctionContaining(refAddr).isThunk()) {
+			return true;
+		}
+		return false;
+	}
+	
+	
+	protected Vector<Arg> createArguments(FunctionManager funcMan, Symbol symbol, VarnodeContext nodeContxt) {
 		Vector<Arg> args = new Vector<Arg>();
 		Function func = funcMan.getFunctionAt(symbol.getAddress());
 		Parameter[] params = func.getParameters();
 		for(Parameter param : params) {
-			Arg arg = new Arg();
-			if(param.isStackVariable()) {
-				Variable stackVar = createVariable(param.getFirstStorageVarnode(), nodeContxt);
-				arg.setLocation(new Expression("LOAD", stackVar));
-				arg.setIntent("INPUT");
-			} else if(param.isRegisterVariable()) {
-				arg.setVar(createVariable(param.getFirstStorageVarnode(), nodeContxt));
-				arg.setIntent("INPUT");
-			}
-			args.add(arg);
+			args.add(specifyArg(param, nodeContxt));
 		}
 	    if(!func.hasNoReturn() && !func.getReturn().getDataType().getName().equals("void")) {
 	    	args.add(new Arg(createVariable(func.getReturn().getFirstStorageVarnode(), nodeContxt), "OUTPUT"));
 		}
-		return new ExternSymbol(tid, symbol.getAddress().toString(), symbol.getName(), funcMan.getDefaultCallingConvention().getName(), args);
+	    
+	    return args;
+	}
+	
+	
+	protected Arg specifyArg(Parameter param, VarnodeContext nodeContxt) {
+		Arg arg = new Arg();
+		if(param.isStackVariable()) {
+			Variable stackVar = createVariable(param.getFirstStorageVarnode(), nodeContxt);
+			arg.setLocation(new Expression("LOAD", stackVar));
+			arg.setIntent("INPUT");
+		} else if(param.isRegisterVariable()) {
+			arg.setVar(createVariable(param.getFirstStorageVarnode(), nodeContxt));
+			arg.setIntent("INPUT");
+		}
+		
+		return arg;
 	}
 	
 	
@@ -350,108 +389,6 @@ public class PcodeExtractor extends GhidraScript {
 	
 	protected String removeConstantPrefix(String constant) {
 		return constant.replaceFirst("^(const:)", "");
-	}
-	
-	
-	protected void printTerms(Term<Program> program) {
-		for(Term<Sub> sub : program.getTerm().getSubs()) {
-			System.out.printf("[SUB]: %s, (id): %s, (addr): %s\n\n", sub.getTerm().getName(), sub.getTid().getId(), sub.getTid().getAddress());
-			for(Term<Blk> blk : sub.getTerm().getBlocks()) {
-				System.out.printf("    [BLK]: -, (id): %s, (addr): %s\n\n", blk.getTid().getId(), blk.getTid().getAddress());
-				for(Term<Def> def : blk.getTerm().getDefs()) {
-					printDef(def);
-				}
-				for(Term<Jmp> jmp : blk.getTerm().getJmps()) {
-					printJmp(jmp);
-				}
-				System.out.println("\n");
-			}
-		}
-	}
-	
-	
-	protected void printDef(Term<Def> definition) { 
-		Variable output = definition.getTerm().getLhs();
-		Expression input = definition.getTerm().getRhs();
-		String mnemonic = input.getMnemonic();
-		Tid defTid = definition.getTid();
-		if(mnemonic.equals("STORE")) {
-			if(input.getInput2() == null) {
-				System.out.printf("        [DEF]: <%s> *%s = %s, (id): %s, (addr): %s\n", mnemonic, input.getInput0().getName(), input.getInput1().getName(), defTid.getId(), defTid.getAddress());
-			} else {
-				System.out.printf("        [DEF]: <%s> *[%s]%s = %s, (id): %s, (addr): %s\n", mnemonic, input.getInput0().getName(), input.getInput1().getName(), input.getInput2().getName(), defTid.getId(), defTid.getAddress());
-			}
-		}
-		
-		if(mnemonic.equals("LOAD")) {
-			if(input.getInput1() == null) {
-				System.out.printf("        [DEF]: <%s> %s = *%s, (id): %s, (addr): %s\n", mnemonic, output.getName(), input.getInput0().getName(), defTid.getId(), defTid.getAddress());
-			} else {
-				System.out.printf("        [DEF]: <%s> %s = *[%s]%s, (id): %s, (addr): %s\n", mnemonic, output.getName(), input.getInput0().getName(), input.getInput1().getName(), defTid.getId(), defTid.getAddress());
-			}
-		}
-		
-		if(this.binOps.contains(mnemonic)) {
-			System.out.printf("        [DEF]: %s = %s <%s> %s, (id): %s, (addr): %s\n", output.getName(), input.getInput0().getName(), mnemonic, input.getInput1().getName(), defTid.getId(), defTid.getAddress());
-		}
-		
-		if(this.unOps.contains(mnemonic) || this.casts.contains(mnemonic) || mnemonic.equals("COPY")) {
-			System.out.printf("        [DEF]: <%s> %s = %s, (id): %s, (addr): %s\n", mnemonic,  output.getName(), input.getInput0().getName(), defTid.getId(), defTid.getAddress());
-		}
-		
-		if(mnemonic.equals("SUBPIECE")) {
-			System.out.printf("        [DEF]: <%s> %s = %s(%s), (id): %s, (addr): %s\n", mnemonic,  output.getName(), input.getInput0().getName(), input.getInput1().getName(), defTid.getId(), defTid.getAddress());
-		}
-	}
-	
-	
-	protected void printJmp(Term<Jmp> jump) {
-		Jmp jmp = jump.getTerm();
-		Tid tid = jump.getTid();
-		String mnemonic = jmp.getMnemonic();
-		if(mnemonic.equals("CALL")) {
-			Call call = jmp.getCall();
-			System.out.printf("        [JMP]: <%s>, (target): %s, (return): %s, (id): %s, (addr): %s\n", mnemonic, call.getTarget().getDirect().getId(), call.getReturn_().getDirect().getId(), tid.getId(), tid.getAddress());
-		} 
-		
-		if(mnemonic.equals("CALLIND")) {
-			Call call = jmp.getCall();
-			if(call.getReturn_().getDirect() == null) {
-				System.out.printf("        [JMP]: <%s>, (target): %s, TAIL CALL, (id): %s, (addr): %s\n", mnemonic, call.getTarget().getIndirect().getInput0().getName(), tid.getId(), tid.getAddress());
-			} else {
-				System.out.printf("        [JMP]: <%s>, (target): %s, (return): %s, (id): %s, (addr): %s\n", mnemonic, call.getTarget().getIndirect().getInput0().getName(), call.getReturn_().getDirect().getId(), tid.getId(), tid.getAddress());
-			}
-		}
-		
-		if(mnemonic.equals("RETURN")) {
-			System.out.printf("        [JMP]: <%s>, (goto): %s, (id): %s (addr): %s\n", mnemonic, jmp.getGoto_().getIndirect().getInput0().getName(), tid.getId(), tid.getAddress());
-		}
-		
-		if(mnemonic.equals("BRANCH")) {
-			System.out.printf("        [JMP]: <%s>, (goto): %s, (id): %s, (addr): %s\n", mnemonic, jmp.getGoto_().getDirect().getAddress(), tid.getId(), tid.getAddress());
-		}
-		
-		if(mnemonic.equals("BRANCHIND")) {
-			System.out.printf("        [JMP]: <%s>, (goto): %s, (id): %s, (addr): %s\n", mnemonic, jmp.getGoto_().getIndirect().getInput0().getName(), tid.getId(), tid.getAddress());
-		}
-		
-		if(mnemonic.equals("CBRANCH")) {
-			System.out.printf("        [JMP]: <%s>, (goto): %s, (if): %s, (id): %s, (addr): %s\n", mnemonic, jmp.getGoto_().getDirect().getId(), jmp.getCondition().getName(), tid.getId(), tid.getAddress());
-		}
-	}
-	
-	protected void printExternSymbols(Program program) {
-		for(ExternSymbol sym : program.getExternSymbols()) {
-			System.out.printf("[Symbol]: %s\n", sym.getName());
-			for(Arg arg : sym.getArguments()) {
-				if(arg.getVar() == null) {
-					System.out.printf("    [Parameter]: %s from %s with size: %s, (intent): %s\n", arg.getLocation().getMnemonic(), arg.getLocation().getInput0().getName(), arg.getLocation().getInput0().getSize(), arg.getIntent());
-				} else {
-					System.out.printf("    [Parameter]: %s, (size): %s, (intent): %s\n", arg.getVar().getName(), arg.getVar().getSize(), arg.getIntent());
-				}
-			}
-			System.out.println("\n");
-		}
 	}
 	
 }
