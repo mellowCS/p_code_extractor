@@ -11,9 +11,9 @@ import term.Sub;
 public class Serializer {
 	private Project project;
 	private String path;
-	
+
 	public Serializer() {}
-	
+
 	public Serializer(Project project, String path) {
 		this.setProject(project);
 		this.setPath(path);
@@ -26,7 +26,7 @@ public class Serializer {
 	public void setProject(Project project) {
 		this.project = project;
 	}
-	
+
 	public String getPath() {
 		return path;
 	}
@@ -34,7 +34,7 @@ public class Serializer {
 	public void setPath(String path) {
 		this.path = path;
 	}
-	
+
 	public void serializeProject() {
 		ExclusionStrategy strategy = new ExclusionStrategy() {
 	        @Override
@@ -44,16 +44,18 @@ public class Serializer {
 	            }
 	            return false;
 	        }
-	 
+
 	        @Override
 	        public boolean shouldSkipClass(Class<?> clazz) {
 	            return false;
 	        }
 	    };
-	    
+
 		Gson gson = new GsonBuilder().setPrettyPrinting().addSerializationExclusionStrategy(strategy).create();
 		try {
-			gson.toJson(project, new FileWriter(path));
+			FileWriter writer = new FileWriter(path);
+			gson.toJson(project, writer);
+			writer.close();
 		} catch (JsonIOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();

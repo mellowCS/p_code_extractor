@@ -15,8 +15,9 @@ def build_command(ghidra: Path, import_: Path) -> list:
     ghidra = ghidra / 'support' / 'analyzeHeadless'
     project_root = Path.cwd()
     tmp = project_root / 'tmp'
-    tmp.mkdir()
-    command = [str(ghidra), str(tmp), 'PcodeExtractor', '-import', str(import_), '-postScript', 'PcodeExtractor.java', str(tmp / 'cwe_78_2.json'),  '-scriptPath', str(project_root), '-deleteProject']
+    if not tmp.is_dir():
+        tmp.mkdir()
+    command = [str(ghidra), str(tmp), 'PcodeExtractor', '-import', str(import_), '-postScript', 'PcodeExtractor.java', str(tmp / (import_.name + '.json')),  '-scriptPath', str(project_root), '-deleteProject']
 
     return command
 
