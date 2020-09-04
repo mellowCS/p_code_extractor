@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.Vector;
+import java.util.stream.StreamSupport;
 
 import org.apache.commons.lang3.EnumUtils;
 import org.python.jline.internal.Nullable;
@@ -17,6 +18,7 @@ import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
 import ghidra.program.model.block.CodeBlockIterator;
+import ghidra.program.model.block.CodeBlockReferenceIterator;
 import ghidra.program.model.block.SimpleBlockModel;
 import ghidra.program.model.lang.CompilerSpec;
 import ghidra.program.model.lang.Register;
@@ -66,7 +68,7 @@ public class PcodeExtractor extends GhidraScript {
 
 		String jsonPath = getScriptArgs()[0];
 		Serializer ser = new Serializer(project, jsonPath);
-	  ser.serializeProject();
+	        ser.serializeProject();
 		TimeUnit.SECONDS.sleep(3);
 
 	}
@@ -114,7 +116,7 @@ public class PcodeExtractor extends GhidraScript {
 			while(blockIter.hasNext()) {
 				CodeBlock block = blockIter.next();
 				Term<Blk> currentBlk = createBlkTerm(block);
-				blocks.add(iterateInstructions(currentBlk, listing.getInstructions(block, true), nodeContxt));
+				blocks.add(iterateInstructions(currentBlk, listing, block , nodeContxt));
 			}
 		}
 		catch(CancelledException e) {
@@ -127,31 +129,105 @@ public class PcodeExtractor extends GhidraScript {
 
 	/**
 	 * @param block: Blk Term to be filled with instructions
-	 * @param instructions: Assembly instructions
+	 * @param listing: Assembly instructions
+	 * @param codeBlock: codeBlock for retrieving its instructions
 	 * @param nodeContxt: Varnode context to create Variables
 	 * @return: new Blk Term
 	 *
 	 * Iterates over pcode instructions and adds either jmp or def term depending on the mnemonic.
 	 *
 	 */
-	protected Term<Blk> iterateInstructions(Term<Blk> block, InstructionIterator instructions, VarnodeContext nodeContxt) {
-		int pCodeCount = 0;
+	protected Term<Blk> iterateInstructions(Term<Blk> block, Listing listing, CodeBlock codeBlock,  VarnodeContext nodeContxt) {
+		int instrCount = 0;
+		int pCodeIndex = 0;
+		InstructionIterator instructions = listing.getInstructions(codeBlock, true);
+		long numOfInstr = StreamSupport.stream(listing.getInstructions(codeBlock, true).spliterator(), false).count();
 		for (Instruction instr : instructions) {
-			Address instrAddr = instr.getAddress();
-			for(PcodeOp pcodeOp : instr.getPcode(true)) {
-				String mnemonic = pcodeOp.getMnemonic();
-				if(this.jumps.contains(mnemonic)) {
-					Term<Jmp> jmp = createJmpTerm(instr, pCodeCount, pcodeOp, mnemonic, instrAddr, nodeContxt);
-					block.getTerm().addJmp(jmp);
-				} else {
-					Term<Def> def = createDefTerm(pCodeCount, pcodeOp, instrAddr, nodeContxt);
-					block.getTerm().addDef(def);
-				}
-				pCodeCount++;
-			}
+			int numOfPcode = instr.getPcode(true).length;
+			block = iteratePcode(block, instr, instrCount, pCodeIndex, numOfInstr, numOfPcode, nodeContxt);
+			instrCount++;
+			pCodeIndex = numOfPcode;
+		}
+		
+		if(block.getTerm().getDefs().isEmpty() && block.getTerm().getJmps().isEmpty()) {
+			block.getTerm().addJmp(handleEmptyBlock(codeBlock));
 		}
 
 		return block;
+	}
+	
+	
+	/**
+	 * @param codeBlock: Current empty block
+	 * @return New jmp term containing fall through address
+	 */
+	protected Term<Jmp> handleEmptyBlock(CodeBlock codeBlock) {
+		Tid jmpTid = new Tid(String.format("instr_%s_%s", codeBlock.getFirstStartAddress().toString(), 0), codeBlock.getFirstStartAddress().toString());
+		Tid gotoTid = new Tid();
+		try {
+			CodeBlockReferenceIterator destinations = codeBlock.getDestinations(getMonitor());
+			while(destinations.hasNext()) {
+				String destAddr = destinations.next().getDestinationBlock().getFirstStartAddress().toString();
+				gotoTid.setId(String.format("blk_%s", destAddr));
+				gotoTid.setAddress(destAddr);
+				break;
+			}
+		} catch(CancelledException e) {
+			System.out.printf("Could not retrieve destinations for block at: %s\n", codeBlock.getFirstStartAddress().toString());
+		}
+		return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, "BRANCH", new Label(gotoTid)));
+	}
+
+
+   /**
+    * @param block: block term to be filled with jmps and defs
+	* @param instr: Instruction to extract Pcode from
+	* @param instrCount: The number of instructions of the current block
+	* @param pCodeIndex: Index of the current pcode instruction
+    * @param numOfInstr: Number of instructions of the current block
+    * @param numOfPcode: Total number of pcode instructions to identify defs at the end
+    * @param nodeContxt: Varnode context to create variables
+	* @return: current block
+	*
+	* Iterates over each Pcode instruction of the current assembly Instruction
+	* and creates the corresponding jmp or def term.
+	*
+	*/
+	protected Term<Blk> iteratePcode(Term<Blk> block, Instruction instr, int instrCount, int pCodeIndex, long numOfInstr, int numOfPcode, VarnodeContext nodeContxt) {
+		int pCodeIteration = 0;
+		for(PcodeOp pcodeOp : instr.getPcode(true)) {
+			String mnemonic = pcodeOp.getMnemonic();
+			if(this.jumps.contains(mnemonic)) {
+				Term<Jmp> jmp = createJmpTerm(instr, pCodeIndex, pcodeOp, mnemonic, instr.getAddress(), nodeContxt);
+				block.getTerm().addJmp(jmp);
+			} else {
+				if(instrCount == numOfInstr-1 && pCodeIteration == numOfPcode-1) {
+					block.getTerm().addJmp(castToJmp(instr, pCodeIndex));
+				} else {
+					Term<Def> def = createDefTerm(pCodeIndex, pcodeOp, instr.getAddress(), nodeContxt);
+					block.getTerm().addDef(def);
+				}
+			}
+			pCodeIteration++;
+			pCodeIndex++;
+		}
+		return block;
+	}
+
+
+   /**
+	* @param instr: last instruction of the Block
+	* @param pCodeCount: index of the last pcode instruction
+	* @return: Jmp term casted from def using the BRANCH type and fall through address
+	*
+	* If the last pcode instruction of a block is a definition, cast it into a Jmp
+	* with the fall through address as goto label
+	*
+	*/
+	protected Term<Jmp> castToJmp(Instruction instr, int pCodeCount) {
+		Tid jmpTid = new Tid(String.format("instr_%s_%s", instr.getAddress().toString(), pCodeCount), instr.getAddress().toString());
+		Tid gotoTid = new Tid(String.format("blk_%s", instr.getFallThrough().toString()), instr.getFallThrough().toString());
+		return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, "BRANCH", new Label(gotoTid)));
 	}
 
 
