@@ -7,7 +7,7 @@ import com.google.gson.annotations.SerializedName;
 
 public class Jmp {
 	
-	@SerializedName("type")
+	@SerializedName("type_")
 	private ExecutionType.JmpType type;
 	@SerializedName("mnemonic")
 	private String mnemonic;

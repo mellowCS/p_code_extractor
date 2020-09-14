@@ -6,6 +6,7 @@ import com.google.gson.*;
 
 import term.Project;
 import term.Sub;
+import term.Jmp;
 
 
 public class Serializer {
@@ -42,6 +43,9 @@ public class Serializer {
 	            if (field.getDeclaringClass() == Sub.class && field.getName().equals("addresses")) {
 	                return true;
 	            }
+                    if (field.getDeclaringClass() == Jmp.class && field.getName().equals("mnemonic")) {
+                        return true;
+                    }
 	            return false;
 	        }
 
@@ -57,10 +61,8 @@ public class Serializer {
 			gson.toJson(project, writer);
 			writer.close();
 		} catch (JsonIOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 	}

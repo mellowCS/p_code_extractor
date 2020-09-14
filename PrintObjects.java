@@ -85,14 +85,14 @@ public class PrintObjects {
 		if(mnemonic.equals("CALLIND")) {
 			Call call = jmp.getCall();
 			if(call.getReturn_().getDirect() == null) {
-				System.out.printf("        [JMP]: <%s>, (target): %s, TAIL CALL, (id): %s, (addr): %s\n", mnemonic, call.getTarget().getIndirect().getInput0().getName(), tid.getId(), tid.getAddress());
+				System.out.printf("        [JMP]: <%s>, (target): %s, TAIL CALL, (id): %s, (addr): %s\n", mnemonic, call.getTarget().getIndirect().getName(), tid.getId(), tid.getAddress());
 			} else {
-				System.out.printf("        [JMP]: <%s>, (target): %s, (return): %s, (id): %s, (addr): %s\n", mnemonic, call.getTarget().getIndirect().getInput0().getName(), call.getReturn_().getDirect().getId(), tid.getId(), tid.getAddress());
+				System.out.printf("        [JMP]: <%s>, (target): %s, (return): %s, (id): %s, (addr): %s\n", mnemonic, call.getTarget().getIndirect().getName(), call.getReturn_().getDirect().getId(), tid.getId(), tid.getAddress());
 			}
 		}
 		
 		if(mnemonic.equals("RETURN")) {
-			System.out.printf("        [JMP]: <%s>, (goto): %s, (id): %s (addr): %s\n", mnemonic, jmp.getGoto_().getIndirect().getInput0().getName(), tid.getId(), tid.getAddress());
+			System.out.printf("        [JMP]: <%s>, (goto): %s, (id): %s (addr): %s\n", mnemonic, jmp.getGoto_().getIndirect().getName(), tid.getId(), tid.getAddress());
 		}
 		
 		if(mnemonic.equals("BRANCH")) {
@@ -100,7 +100,7 @@ public class PrintObjects {
 		}
 		
 		if(mnemonic.equals("BRANCHIND")) {
-			System.out.printf("        [JMP]: <%s>, (goto): %s, (id): %s, (addr): %s\n", mnemonic, jmp.getGoto_().getIndirect().getInput0().getName(), tid.getId(), tid.getAddress());
+			System.out.printf("        [JMP]: <%s>, (goto): %s, (id): %s, (addr): %s\n", mnemonic, jmp.getGoto_().getIndirect().getName(), tid.getId(), tid.getAddress());
 		}
 		
 		if(mnemonic.equals("CBRANCH")) {

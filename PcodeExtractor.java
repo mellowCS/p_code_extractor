@@ -3,12 +3,11 @@
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.Vector;
 import java.util.stream.StreamSupport;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.lang3.EnumUtils;
 import org.python.jline.internal.Nullable;
-import java.util.concurrent.TimeUnit;
 
 import bil.*;
 import term.*;
@@ -16,6 +15,7 @@ import symbol.ExternSymbol;
 import serializer.Serializer;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressIterator;
 import ghidra.program.model.block.CodeBlock;
 import ghidra.program.model.block.CodeBlockIterator;
 import ghidra.program.model.block.CodeBlockReferenceIterator;
@@ -32,6 +32,7 @@ import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.Symbol;
+import ghidra.program.model.symbol.SymbolTable;
 import ghidra.program.model.symbol.SymbolIterator;
 import ghidra.program.util.VarnodeContext;
 import ghidra.util.exception.CancelledException;
@@ -44,6 +45,7 @@ public class PcodeExtractor extends GhidraScript {
 		add("BRANCHIND");
 		add("CALL");
 		add("CALLIND");
+                add("CALLOTHER");
 		add("RETURN");
 	}};
 
@@ -61,9 +63,10 @@ public class PcodeExtractor extends GhidraScript {
 		SimpleBlockModel simpleBM = new SimpleBlockModel(currentProgram);
 		Listing listing = currentProgram.getListing();
 		VarnodeContext nodeContxt = new VarnodeContext(currentProgram, currentProgram.getProgramContext(), currentProgram.getProgramContext());
+                String cpuArch = getCpuArchitecture(currentProgram);
 
 		Term<Program> program = createProgramTerm(funcMan, currentProgram, nodeContxt);
-		Project project = createProject(program);
+		Project project = createProject(program, cpuArch);
 		program = iterateFunctions(program, funcMan, simpleBM, listing, nodeContxt);
 
 		String jsonPath = getScriptArgs()[0];
@@ -71,6 +74,20 @@ public class PcodeExtractor extends GhidraScript {
 	        ser.serializeProject();
 		TimeUnit.SECONDS.sleep(3);
 
+	}
+
+        
+        /**
+         * @param program: Used to get the Language ID
+         * @return: CPU architecture as string.
+         *
+         * Uses Ghidra's language id to extract the CPU arch as "arch-bits" e.g. x86_64, x86_32 etc.
+         * 
+         */
+        protected String getCpuArchitecture(ghidra.program.model.listing.Program program) {
+		String langId = program.getCompilerSpec().getLanguage().getLanguageID().getIdAsString();
+		String[] arch = langId.split(":");
+		return arch[0] + "_" + arch[2];
 	}
 
 
@@ -104,13 +121,13 @@ public class PcodeExtractor extends GhidraScript {
 	 * @param simpleBM: Simple Block Model to iterate over blocks
 	 * @param listing: Listing to get assembly instructions
 	 * @param nodeContxt: Varnode context to create Variables
-	 * @return: new Vector of Blk Terms
+	 * @return: new ArrayList of Blk Terms
 	 *
 	 * Iterates over all blocks and calls the instruction iterator to add def and jmp terms to each block.
 	 *
 	 */
-	protected Vector<Term<Blk>> iterateBlocks(Term<Sub> currentSub, SimpleBlockModel simpleBM, Listing listing, VarnodeContext nodeContxt) {
-		Vector<Term<Blk>> blocks = new Vector<Term<Blk>>();
+	protected ArrayList<Term<Blk>> iterateBlocks(Term<Sub> currentSub, SimpleBlockModel simpleBM, Listing listing, VarnodeContext nodeContxt) {
+		ArrayList<Term<Blk>> blocks = new ArrayList<Term<Blk>>();
 		try {
 			CodeBlockIterator blockIter = simpleBM.getCodeBlocksContaining(currentSub.getTerm().getAddresses(), getMonitor());
 			while(blockIter.hasNext()) {
@@ -175,7 +192,7 @@ public class PcodeExtractor extends GhidraScript {
 		} catch(CancelledException e) {
 			System.out.printf("Could not retrieve destinations for block at: %s\n", codeBlock.getFirstStartAddress().toString());
 		}
-		return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, "BRANCH", new Label(gotoTid)));
+		return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, "BRANCH", new Label((Tid) gotoTid)));
 	}
 
 
@@ -227,24 +244,26 @@ public class PcodeExtractor extends GhidraScript {
 	protected Term<Jmp> castToJmp(Instruction instr, int pCodeCount) {
 		Tid jmpTid = new Tid(String.format("instr_%s_%s", instr.getAddress().toString(), pCodeCount), instr.getAddress().toString());
 		Tid gotoTid = new Tid(String.format("blk_%s", instr.getFallThrough().toString()), instr.getFallThrough().toString());
-		return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, "BRANCH", new Label(gotoTid)));
+		return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, "BRANCH", new Label((Tid) gotoTid)));
 	}
 
 
 	/**
 	 * @param program: Input for project's program attribute
+         * @param cpuArch: CPU architecture as string
 	 * @return: new Project
 	 *
 	 * Creates the project object and adds the stack pointer register and program term.
 	 *
 	 */
-	protected Project createProject(Term<Program> program) {
+	protected Project createProject(Term<Program> program, String cpuArch) {
 		Project project = new Project();
 		CompilerSpec comSpec = currentProgram.getCompilerSpec();
 		Register stackPointerRegister = comSpec.getStackPointer();
 		Variable stackPointerVar = new Variable(stackPointerRegister.getName(), stackPointerRegister.getBitLength(), false);
 		project.setProgram(program);
 		project.setStackPointerRegister(stackPointerVar);
+                project.setCpuArch(cpuArch);
 
 		return project;
 	}
@@ -261,13 +280,20 @@ public class PcodeExtractor extends GhidraScript {
 	 */
 	protected Term<Program> createProgramTerm(FunctionManager funcMan, ghidra.program.model.listing.Program program, VarnodeContext nodeContxt) {
 		Tid progTid = new Tid(String.format("prog_%s", program.getMinAddress().toString()), program.getMinAddress().toString());
-		Vector<ExternSymbol> externalSymbols = new Vector<ExternSymbol>();
-		SymbolIterator symExtern = program.getSymbolTable().getExternalSymbols();
+		ArrayList<ExternSymbol> externalSymbols = new ArrayList<ExternSymbol>();
+		SymbolTable symTab = program.getSymbolTable();
+                AddressIterator entryPoints = symTab.getExternalEntryPointIterator();
+                ArrayList<Tid> entryTids = new ArrayList<Tid>();
+                while(entryPoints.hasNext()) {
+                        Address entry = entryPoints.next();
+                        entryTids.add(new Tid(String.format("sub_%s", entry.toString()), entry.toString()));
+                }
+                SymbolIterator symExtern = symTab.getExternalSymbols();
 		while(symExtern.hasNext()) {
 			Symbol ex = symExtern.next();
 			externalSymbols.add(createExternSymbol(program, funcMan, ex, nodeContxt));
 		}
-		return new Term<Program>(progTid, new Program(new Vector<Term<Sub>>(), externalSymbols));
+		return new Term<Program>(progTid, new Program(new ArrayList<Term<Sub>>(), externalSymbols, entryTids));
 	}
 
 
@@ -284,7 +310,7 @@ public class PcodeExtractor extends GhidraScript {
 	protected ExternSymbol createExternSymbol(ghidra.program.model.listing.Program program, FunctionManager funcMan, Symbol symbol, VarnodeContext nodeContxt) {
 		Symbol libSym = getInternalCaller(program, funcMan, symbol);
 		Tid tid = new Tid(String.format("sub_%s", libSym.getAddress().toString()), libSym.getAddress().toString());
-		Vector<Arg> args = createArguments(funcMan, libSym, nodeContxt);
+		ArrayList<Arg> args = createArguments(funcMan, libSym, nodeContxt);
 		return new ExternSymbol(tid, libSym.getAddress().toString(), libSym.getName(), funcMan.getDefaultCallingConvention().getName(), args);
 
 	}
@@ -336,13 +362,13 @@ public class PcodeExtractor extends GhidraScript {
 	 * @param funcMan: Ghidra function manager to get function at specific address
 	 * @param symbol: Symbol used to get corresponding function
 	 * @param nodeContxt: Varnode context to create Variables
-	 * @return: new Arg Vector
+	 * @return: new Arg ArrayList
 	 *
 	 * Creates Arguments for the ExternSymbol object.
 	 *
 	 */
-	protected Vector<Arg> createArguments(FunctionManager funcMan, Symbol symbol, VarnodeContext nodeContxt) {
-		Vector<Arg> args = new Vector<Arg>();
+	protected ArrayList<Arg> createArguments(FunctionManager funcMan, Symbol symbol, VarnodeContext nodeContxt) {
+		ArrayList<Arg> args = new ArrayList<Arg>();
 		Function func = funcMan.getFunctionAt(symbol.getAddress());
 		Parameter[] params = func.getParameters();
 		for(Parameter param : params) {
@@ -401,7 +427,7 @@ public class PcodeExtractor extends GhidraScript {
 	 */
 	protected Term<Blk> createBlkTerm(CodeBlock block) {
 		Tid blkTid = new Tid(String.format("blk_%s", block.getFirstStartAddress().toString()), block.getFirstStartAddress().toString());
-		return new Term<Blk>(blkTid, new Blk(new Vector<Term<Def>>(), new Vector<Term<Jmp>>()));
+		return new Term<Blk>(blkTid, new Blk(new ArrayList<Term<Def>>(), new ArrayList<Term<Jmp>>()));
 	}
 
 
@@ -426,7 +452,9 @@ public class PcodeExtractor extends GhidraScript {
 			return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, mnemonic, createLabel(mnemonic, pcodeOp, nodeContxt, null)));
 		} else if (mnemonic.equals("RETURN")) {
 			return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.RETURN, mnemonic, createLabel(mnemonic, pcodeOp, nodeContxt, null)));
-		}
+		} else if(mnemonic.equals("CALLOTHER")) {
+                        return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.CALL, "CALL", createCall(instr, "CALL", pcodeOp, nodeContxt)));
+                }
 
 		return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.CALL, mnemonic, createCall(instr, mnemonic, pcodeOp, nodeContxt)));
 	}
@@ -529,26 +557,26 @@ public class PcodeExtractor extends GhidraScript {
 	 * @param fallThrough: fallThrough address of branch/call
 	 * @return: new Label
 	 *
-	 * Create a Label based on the branch instruction. For indirect branches and calls, it consists of an Expression, for calls of a sub TID
+	 * Create a Label based on the branch instruction. For indirect branches and calls, it consists of a Variable, for calls of a sub TID
 	 * and for branches of a blk TID.
 	 *
 	 */
 	protected Label createLabel(String mnemonic, PcodeOp pcodeOp, VarnodeContext nodeContxt, @Nullable Address fallThrough) {
 		if (fallThrough == null) {
 			if (mnemonic.equals("CALLIND") || mnemonic.equals("BRANCHIND") || mnemonic.equals("RETURN")) {
-				return new Label(new Expression(mnemonic, createVariable(pcodeOp.getInput(0), nodeContxt)));
+				return new Label((Variable) createVariable(pcodeOp.getInput(0), nodeContxt));
 			}
 
 			if(mnemonic.equals("CALL")) {
-				return new Label(new Tid(String.format("sub_%s", pcodeOp.getInput(0).getAddress().toString()), pcodeOp.getInput(0).getAddress().toString()));
+				return new Label((Tid) new Tid(String.format("sub_%s", pcodeOp.getInput(0).getAddress().toString()), pcodeOp.getInput(0).getAddress().toString()));
 			}
 
 			if(mnemonic.equals("BRANCH") || mnemonic.equals("CBRANCH")) {
-				return new Label(new Tid(String.format("blk_%s", pcodeOp.getInput(0).getAddress().toString()), pcodeOp.getInput(0).getAddress().toString()));
+				return new Label((Tid) new Tid(String.format("blk_%s", pcodeOp.getInput(0).getAddress().toString()), pcodeOp.getInput(0).getAddress().toString()));
 			}
 		}
 
-		return new Label(new Tid(String.format("blk_%s", fallThrough.toString()), fallThrough.toString()));
+		return new Label((Tid) new Tid(String.format("blk_%s", fallThrough.toString()), fallThrough.toString()));
 	}
 
 

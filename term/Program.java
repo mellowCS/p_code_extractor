@@ -1,33 +1,38 @@
 package term;
 
-import java.util.Vector;
+import java.util.ArrayList;
 import com.google.gson.annotations.SerializedName;
 
 import symbol.ExternSymbol;
+import term.Tid;
 
 public class Program {
+
 	@SerializedName("subs")
-	private Vector<Term<Sub>> subs;
+	private ArrayList<Term<Sub>> subs;
 	@SerializedName("extern_symbols")
-	private Vector<ExternSymbol> externSymbols;
+	private ArrayList<ExternSymbol> externSymbols;
+        @SerializedName("entry_points")
+        private ArrayList<Tid> entryPoints;
 	
 	public Program() {}
 	
-	public Program(Vector<Term<Sub>> subs) {
+	public Program(ArrayList<Term<Sub>> subs) {
 		this.setSubs(subs);
 	}
 	
-	public Program(Vector<Term<Sub>> subs, Vector<ExternSymbol> externSymbols) {
+	public Program(ArrayList<Term<Sub>> subs, ArrayList<ExternSymbol> externSymbols, ArrayList<Tid> entryPoints) {
 		this.setSubs(subs);
 		this.setExternSymbols(externSymbols);
+                this.setEntryPoints(entryPoints);
 	}
 	
 	
-	public Vector<Term<Sub>> getSubs() {
+	public ArrayList<Term<Sub>> getSubs() {
 		return subs;
 	}
 	
-	public void setSubs(Vector<Term<Sub>> subs) {
+	public void setSubs(ArrayList<Term<Sub>> subs) {
 		this.subs = subs;
 	}
 	
@@ -35,11 +40,19 @@ public class Program {
 		this.subs.add(sub);
 	}
 
-	public Vector<ExternSymbol> getExternSymbols() {
+	public ArrayList<ExternSymbol> getExternSymbols() {
 		return externSymbols;
 	}
 
-	public void setExternSymbols(Vector<ExternSymbol> extern_symbols) {
+	public void setExternSymbols(ArrayList<ExternSymbol> extern_symbols) {
 		this.externSymbols = extern_symbols;
 	}
+
+        public ArrayList<Tid> getEntryPoints() {
+                return entryPoints;
+        }
+
+        public void setEntryPoints(ArrayList<Tid> entryPoints) {
+                this.entryPoints = entryPoints;
+        }
 }

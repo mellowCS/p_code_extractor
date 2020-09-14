@@ -1,21 +1,21 @@
 package term;
 
-import bil.Expression;
+import bil.Variable;
 import com.google.gson.annotations.SerializedName;
 
 public class Label {
 	
-	@SerializedName("direct")
+	@SerializedName("Direct")
 	private Tid direct;
-	@SerializedName("indirect")
-	private Expression indirect;
+	@SerializedName("Indirect")
+	private Variable indirect;
 	
 	public Label(Tid tid) {
 		this.setDirect(tid);
 	}
 	
-	public Label(Expression expression) {
-		this.setIndirect(expression);
+	public Label(Variable variable) {
+		this.setIndirect(variable);
 	}
 	 
 	public Tid getDirect() {
@@ -26,11 +26,11 @@ public class Label {
 		this.direct = direct;
 	}
 	
-	public Expression getIndirect() {
+	public Variable getIndirect() {
 		return indirect;
 	}
 	
-	public void setIndirect(Expression indirect) {
+	public void setIndirect(Variable indirect) {
 		this.indirect = indirect;
 	}
 

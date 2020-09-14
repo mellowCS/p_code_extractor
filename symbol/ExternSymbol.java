@@ -1,6 +1,6 @@
 package symbol;
 
-import java.util.Vector;
+import java.util.ArrayList;
 
 import com.google.gson.annotations.SerializedName;
 
@@ -18,11 +18,11 @@ public class ExternSymbol {
 	@SerializedName("calling_convention")
 	private String callingConvention;
 	@SerializedName("arguments")
-	private Vector<Arg> arguments;
+	private ArrayList<Arg> arguments;
 	
 	public ExternSymbol() {}
 	
-	public ExternSymbol(Tid tid, String address, String name, String callingConvention, Vector<Arg> arguments) {
+	public ExternSymbol(Tid tid, String address, String name, String callingConvention, ArrayList<Arg> arguments) {
 		this.setTid(tid);
 		this.setAddress(address);
 		this.setName(name);
@@ -62,11 +62,11 @@ public class ExternSymbol {
 		this.callingConvention = callingConvention;
 	}
 	
-	public Vector<Arg> getArguments() {
+	public ArrayList<Arg> getArguments() {
 		return arguments;
 	}
 	
-	public void setArguments(Vector<Arg> arguments) {
+	public void setArguments(ArrayList<Arg> arguments) {
 		this.arguments = arguments;
 	}
 }

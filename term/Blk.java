@@ -1,34 +1,34 @@
 package term;
 
-import java.util.Vector;
+import java.util.ArrayList;
 import com.google.gson.annotations.SerializedName;
 
 public class Blk {
 	@SerializedName("defs")
-	private Vector<Term<Def>> defs;
+	private ArrayList<Term<Def>> defs;
 	@SerializedName("jmps")
-	private Vector<Term<Jmp>> jmps;
+	private ArrayList<Term<Jmp>> jmps;
 	
 	public Blk() {}
 	
-	public Blk(Vector<Term<Def>> defs, Vector<Term<Jmp>> jmps) {
+	public Blk(ArrayList<Term<Def>> defs, ArrayList<Term<Jmp>> jmps) {
 		this.setDefs(defs);
 		this.setJmps(jmps);
 	}
 
-	public Vector<Term<Def>> getDefs() {
+	public ArrayList<Term<Def>> getDefs() {
 		return defs;
 	}
 
-	public void setDefs(Vector<Term<Def>> defs) {
+	public void setDefs(ArrayList<Term<Def>> defs) {
 		this.defs = defs;
 	}
 
-	public Vector<Term<Jmp>> getJmps() {
+	public ArrayList<Term<Jmp>> getJmps() {
 		return jmps;
 	}
 
-	public void setJmps(Vector<Term<Jmp>> jmps) {
+	public void setJmps(ArrayList<Term<Jmp>> jmps) {
 		this.jmps = jmps;
 	}
 	

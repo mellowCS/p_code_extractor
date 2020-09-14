@@ -1,6 +1,6 @@
 package term;
 
-import java.util.Vector;
+import java.util.ArrayList;
 import com.google.gson.annotations.SerializedName;
 
 import ghidra.program.model.address.AddressSetView;
@@ -10,7 +10,7 @@ public class Sub {
 	private String name;
 	private AddressSetView addresses;
 	@SerializedName("blocks")
-	private Vector<Term<Blk>> blocks;
+	private ArrayList<Term<Blk>> blocks;
 	
 	public Sub() {}
 	
@@ -19,7 +19,7 @@ public class Sub {
 		this.setAddresses(addresses);
 	}
 	
-	public Sub(String name, Vector<Term<Blk>> blocks, AddressSetView addresses) {
+	public Sub(String name, ArrayList<Term<Blk>> blocks, AddressSetView addresses) {
 		this.setName(name);
 		this.setBlocks(blocks);
 		this.setAddresses(addresses);
@@ -33,11 +33,11 @@ public class Sub {
 		this.name = name;
 	}
 
-	public Vector<Term<Blk>> getBlocks() {
+	public ArrayList<Term<Blk>> getBlocks() {
 		return blocks;
 	}
 
-	public void setBlocks(Vector<Term<Blk>> blocks) {
+	public void setBlocks(ArrayList<Term<Blk>> blocks) {
 		this.blocks = blocks;
 	}
 	
