@@ -20,63 +20,63 @@ public class Jmp {
 	
 	public Jmp() {}
 	
-    public Jmp(ExecutionType.JmpType type, String mnemonic, Label goto_) {
-    	this.setType(type);
-    	this.setMnemonic(mnemonic);
-		this.setGoto_(goto_);
+        public Jmp(ExecutionType.JmpType type, String mnemonic, Label goto_) {
+    	    this.setType(type);
+    	    this.setMnemonic(mnemonic);
+	    this.setGoto_(goto_);
 	}
     
-    public Jmp(ExecutionType.JmpType type, String mnemonic, Call call) {
-    	this.setType(type);
-    	this.setMnemonic(mnemonic);
-		this.setCall(call);
+        public Jmp(ExecutionType.JmpType type, String mnemonic, Call call) {
+    	    this.setType(type);
+    	    this.setMnemonic(mnemonic);
+	    this.setCall(call);
 	}
 	
-    public Jmp(ExecutionType.JmpType type, String mnemonic, Label goto_, Variable condition) {
-    	this.setType(type);
-    	this.setMnemonic(mnemonic);
-		this.setGoto_(goto_);
-		this.setCondition(condition);
+        public Jmp(ExecutionType.JmpType type, String mnemonic, Label goto_, Variable condition) {
+    	    this.setType(type);
+    	    this.setMnemonic(mnemonic);
+	    this.setGoto_(goto_);
+	    this.setCondition(condition);
 	}
 	
 	public ExecutionType.JmpType getType() {
-		return type;
+	    return type;
 	}
 
 	public void setType(ExecutionType.JmpType type) {
-		this.type = type;
+	    this.type = type;
 	}
 
 	public String getMnemonic() {
-		return mnemonic;
+	    return mnemonic;
 	}
 
 	public void setMnemonic(String mnemonic) {
-		this.mnemonic = mnemonic;
+	    this.mnemonic = mnemonic;
 	}
 
 	public Variable getCondition() {
-		return condition;
+	    return condition;
 	}
 
 	public void setCondition(Variable condition) {
-		this.condition = condition;
+	    this.condition = condition;
 	}
 
 	public Call getCall() {
-		return call;
+	    return call;
 	}
 
 	public void setCall(Call call) {
-		this.call = call;
+	    this.call = call;
 	}
 
 	public Label getGoto_() {
-		return goto_;
+	    return goto_;
 	}
 
 	public void setGoto_(Label goto_) {
-		this.goto_ = goto_;
+	    this.goto_ = goto_;
 	}
 
 }

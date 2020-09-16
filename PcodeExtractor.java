@@ -452,8 +452,6 @@ public class PcodeExtractor extends GhidraScript {
 			return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, mnemonic, createLabel(mnemonic, pcodeOp, nodeContxt, null)));
 		} else if (mnemonic.equals("RETURN")) {
 			return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.RETURN, mnemonic, createLabel(mnemonic, pcodeOp, nodeContxt, null)));
-		} else if(mnemonic.equals("CALLOTHER")) {
-                        return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.CALL, "CALL", createCall(instr, "CALL", pcodeOp, nodeContxt)));
                 }
 
 		return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.CALL, mnemonic, createCall(instr, mnemonic, pcodeOp, nodeContxt)));
@@ -567,7 +565,7 @@ public class PcodeExtractor extends GhidraScript {
 				return new Label((Variable) createVariable(pcodeOp.getInput(0), nodeContxt));
 			}
 
-			if(mnemonic.equals("CALL")) {
+			if(mnemonic.equals("CALL") || mnemonic.equals("CALLOTHER")) {
 				return new Label((Tid) new Tid(String.format("sub_%s", pcodeOp.getInput(0).getAddress().toString()), pcodeOp.getInput(0).getAddress().toString()));
 			}
 

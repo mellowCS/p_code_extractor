@@ -43,7 +43,7 @@ public class Serializer {
 	            if (field.getDeclaringClass() == Sub.class && field.getName().equals("addresses")) {
 	                return true;
 	            }
-                    if (field.getDeclaringClass() == Jmp.class && field.getName().equals("mnemonic")) {
+                    if (field.getDeclaringClass() == Jmp.class && field.getName().equals("type")) {
                         return true;
                     }
 	            return false;
