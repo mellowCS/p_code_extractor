@@ -500,15 +500,15 @@ public class PcodeExtractor extends GhidraScript {
 			var.setIsVirtual(true);
 		}
 		else if (node.isConstant()) {
-			var.setName(removeConstantPrefix(node.getAddress().toString()));
+			var.setValue(removeConstantPrefix(node.getAddress().toString()));
 			var.setIsVirtual(false);
 		}
 		else if (node.isAddress()) {
-			var.setName(node.getAddress().toString());
+			var.setAddress(node.getAddress().toString());
 			var.setIsVirtual(false);
 		}
 		else if(node.isFree()) {
-			var.setName(node.getAddress().toString());
+			var.setAddress(node.getAddress().toString());
 			var.setIsVirtual(false);
 		}
 

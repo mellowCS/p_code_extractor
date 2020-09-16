@@ -6,6 +6,10 @@ public class Variable {
 	
 	@SerializedName("name")
 	private String name;
+        @SerializedName("value")
+        private String value;
+        @SerializedName("address")
+        private String address;
 	@SerializedName("size")
 	private long size;
 	@SerializedName("is_virtual")
@@ -42,4 +46,20 @@ public class Variable {
 	public void setIsVirtual(Boolean is_virtual) {
 		this.isVirtual = is_virtual;
 	}
+
+        public String getValue() {
+                return value;
+        }
+
+        public void setValue(String value) {
+                this.value = value;
+        }
+
+        public String getAddress() {
+                return address;
+        }
+
+        public void setAddress(String address) {
+                this.address = address;
+        }
 }
