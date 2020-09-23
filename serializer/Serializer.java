@@ -1,4 +1,5 @@
 package serializer;
+
 import java.io.FileWriter;
 import java.io.IOException;
 
@@ -10,60 +11,61 @@ import term.Jmp;
 
 
 public class Serializer {
-	private Project project;
-	private String path;
+    private Project project;
+    private String path;
 
-	public Serializer() {}
+    public Serializer() {
+    }
 
-	public Serializer(Project project, String path) {
-		this.setProject(project);
-		this.setPath(path);
-	}
+    public Serializer(Project project, String path) {
+        this.setProject(project);
+        this.setPath(path);
+    }
 
-	public Project getProject() {
-		return project;
-	}
+    public Project getProject() {
+        return project;
+    }
 
-	public void setProject(Project project) {
-		this.project = project;
-	}
+    public void setProject(Project project) {
+        this.project = project;
+    }
 
-	public String getPath() {
-		return path;
-	}
+    public String getPath() {
+        return path;
+    }
 
-	public void setPath(String path) {
-		this.path = path;
-	}
+    public void setPath(String path) {
+        this.path = path;
+    }
 
-	public void serializeProject() {
-		ExclusionStrategy strategy = new ExclusionStrategy() {
-	        @Override
-	        public boolean shouldSkipField(FieldAttributes field) {
-	            if (field.getDeclaringClass() == Sub.class && field.getName().equals("addresses")) {
-	                return true;
-	            }
-                    if (field.getDeclaringClass() == Jmp.class && field.getName().equals("type")) {
-                        return true;
-                    }
-	            return false;
-	        }
+    public void serializeProject() {
+        ExclusionStrategy strategy = new ExclusionStrategy() {
+            @Override
+            public boolean shouldSkipField(FieldAttributes field) {
+                if (field.getDeclaringClass() == Sub.class && field.getName().equals("addresses")) {
+                    return true;
+                }
+                if (field.getDeclaringClass() == Jmp.class && field.getName().equals("type")) {
+                    return true;
+                }
+                return false;
+            }
 
-	        @Override
-	        public boolean shouldSkipClass(Class<?> clazz) {
-	            return false;
-	        }
-	    };
+            @Override
+            public boolean shouldSkipClass(Class<?> clazz) {
+                return false;
+            }
+        };
 
-		Gson gson = new GsonBuilder().setPrettyPrinting().addSerializationExclusionStrategy(strategy).create();
-		try {
-			FileWriter writer = new FileWriter(path);
-			gson.toJson(project, writer);
-			writer.close();
-		} catch (JsonIOException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-	}
+        Gson gson = new GsonBuilder().setPrettyPrinting().addSerializationExclusionStrategy(strategy).create();
+        try {
+            FileWriter writer = new FileWriter(path);
+            gson.toJson(project, writer);
+            writer.close();
+        } catch (JsonIOException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 }
