@@ -314,7 +314,7 @@ public class PcodeExtractor extends GhidraScript {
         Symbol libSym = getInternalCaller(symbol);
         Tid tid = new Tid(String.format("sub_%s", libSym.getAddress().toString()), libSym.getAddress().toString());
         ArrayList<Arg> args = createArguments(libSym);
-        Boolean noReturn = hasVoidReturn(funcMan.getFunctionAt(libSym.getAddress()));
+        Boolean noReturn = funcMan.getFunctionAt(libSym.getAddress()).hasNoReturn();
         return new ExternSymbol(tid, libSym.getAddress().toString(), libSym.getName(), funcMan.getDefaultCallingConvention().getName(), args, noReturn);
 
     }
