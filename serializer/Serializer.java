@@ -8,6 +8,7 @@ import com.google.gson.*;
 import term.Project;
 import term.Sub;
 import term.Jmp;
+import term.Def;
 
 
 public class Serializer {
@@ -45,7 +46,10 @@ public class Serializer {
                 if (field.getDeclaringClass() == Sub.class && field.getName().equals("addresses")) {
                     return true;
                 }
-                if (field.getDeclaringClass() == Jmp.class && field.getName().equals("type")) {
+                if (field.getDeclaringClass() == Jmp.class && (field.getName().equals("type") || field.getName().equals("pcodeIndex"))) {
+                    return true;
+                }
+                if (field.getDeclaringClass() == Def.class && field.getName().equals("pcodeIndex")) {
                     return true;
                 }
                 return false;

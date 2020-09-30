@@ -11,6 +11,8 @@ public class Blk {
     private ArrayList<Term<Jmp>> jmps;
 
     public Blk() {
+        this.setDefs(new ArrayList<Term<Def>>());
+        this.setJmps(new ArrayList<Term<Jmp>>());
     }
 
     public Blk(ArrayList<Term<Def>> defs, ArrayList<Term<Jmp>> jmps) {
@@ -40,6 +42,10 @@ public class Blk {
 
     public void addJmp(Term<Jmp> jmp) {
         this.jmps.add(jmp);
+    }
+
+    public void addMultipleDefs(ArrayList<Term<Def>> defs) {
+        this.defs.addAll(defs);
     }
 
 

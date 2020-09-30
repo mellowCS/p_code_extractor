@@ -11,17 +11,21 @@ public class Def {
     private Variable lhs;
     @SerializedName("rhs")
     private Expression rhs;
+    @SerializedName("pcode_index")
+    private int pcodeIndex;
 
     public Def() {
     }
 
-    public Def(Expression rhs) {
+    public Def(Expression rhs, int pcodeIndex) {
         this.setRhs(rhs);
+        this.setPcodeIndex(pcodeIndex);
     }
 
-    public Def(Variable lhs, Expression rhs) {
+    public Def(Variable lhs, Expression rhs, int pcodeIndex) {
         this.setLhs(lhs);
         this.setRhs(rhs);
+        this.setPcodeIndex(pcodeIndex);
     }
 
     public Variable getLhs() {
@@ -38,5 +42,13 @@ public class Def {
 
     public void setRhs(Expression rhs) {
         this.rhs = rhs;
+    }
+
+    public int getPcodeIndex() {
+        return pcodeIndex;
+    }
+
+    public void setPcodeIndex(int pcodeIndex) {
+        this.pcodeIndex = pcodeIndex;
     }
 }
