@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import com.google.gson.annotations.SerializedName;
 
 import symbol.ExternSymbol;
-import term.Tid;
 
 public class Program {
 

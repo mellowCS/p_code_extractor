@@ -17,27 +17,32 @@ public class Jmp {
     private Call call;
     @SerializedName("condition")
     private Variable condition;
+    @SerializedName("pcode_index")
+    private int pcodeIndex;
 
     public Jmp() {
     }
 
-    public Jmp(ExecutionType.JmpType type, String mnemonic, Label goto_) {
+    public Jmp(ExecutionType.JmpType type, String mnemonic, Label goto_, int pcodeIndex) {
         this.setType(type);
         this.setMnemonic(mnemonic);
         this.setGoto_(goto_);
+        this.setPcodeIndex(pcodeIndex);
     }
 
-    public Jmp(ExecutionType.JmpType type, String mnemonic, Call call) {
+    public Jmp(ExecutionType.JmpType type, String mnemonic, Call call, int pcodeIndex) {
         this.setType(type);
         this.setMnemonic(mnemonic);
         this.setCall(call);
+        this.setPcodeIndex(pcodeIndex);
     }
 
-    public Jmp(ExecutionType.JmpType type, String mnemonic, Label goto_, Variable condition) {
+    public Jmp(ExecutionType.JmpType type, String mnemonic, Label goto_, Variable condition, int pcodeIndex) {
         this.setType(type);
         this.setMnemonic(mnemonic);
         this.setGoto_(goto_);
         this.setCondition(condition);
+        this.setPcodeIndex(pcodeIndex);
     }
 
     public ExecutionType.JmpType getType() {
@@ -78,6 +83,14 @@ public class Jmp {
 
     public void setGoto_(Label goto_) {
         this.goto_ = goto_;
+    }
+
+    public int getPcodeIndex() {
+        return pcodeIndex;
+    }
+
+    public void setPcodeIndex(int pcodeIndex) {
+        this.pcodeIndex = pcodeIndex;
     }
 
 }
