@@ -126,32 +126,46 @@ public class PcodeExtractor extends GhidraScript {
      * Iterates over all blocks and calls the instruction iterator to add def and jmp terms to each block.
      */
     protected ArrayList<Term<Blk>> iterateBlocks(Term<Sub> currentSub, SimpleBlockModel simpleBM, Listing listing) {
-        ArrayList<Term<Blk>> blocks = new ArrayList<Term<Blk>>();
-        Boolean setGoto = false;
+        ArrayList<Term<Blk>> blockTerms = new ArrayList<Term<Blk>>();
         try {
             CodeBlockIterator blockIter = simpleBM.getCodeBlocksContaining(currentSub.getTerm().getAddresses(), getMonitor());
-            while (blockIter.hasNext()) {
-                CodeBlock block = blockIter.next();
-                if(setGoto) {
-                    setGoto = false;
-                    Tid direct = blocks.get(blocks.size()-1).getTerm().getJmps().get(0).getTerm().getGoto_().getDirect();
-                    direct.setAddress(block.getFirstStartAddress().toString());
-                    direct.setId(String.format("blk_%s", block.getFirstStartAddress().toString()));
-                }
-                ArrayList<Term<Blk>> newBlocks = iterateInstructions(createBlkTerm(block.getFirstStartAddress().toString(), null), listing, block);
-                Term<Blk> lastBlock = newBlocks.get(newBlocks.size() - 1);
-                if(protoLastInstructionIsDef(lastBlock)) {
-                    String instrAddress = lastBlock.getTerm().getDefs().get(lastBlock.getTerm().getDefs().size()-1).getTid().getAddress();
-                    protoAddJumpToCurrentBlock(lastBlock.getTerm(), instrAddress, block.getFirstStartAddress().toString(), null);
-                    setGoto = true;
-                }
-                blocks.addAll(newBlocks);
+            while(blockIter.hasNext()) {
+                CodeBlock currentBlock = blockIter.next();
+                ArrayList<Term<Blk>> newBlockTerms = iterateInstructions(createBlkTerm(currentBlock.getFirstStartAddress().toString(), null), listing, currentBlock);
+                Term<Blk> lastBlockTerm = newBlockTerms.get(newBlockTerms.size() - 1);
+                handlePossibleDefinitionAtEndOfBlock(lastBlockTerm, currentBlock);
+                blockTerms.addAll(newBlockTerms);
             }
         } catch (CancelledException e) {
             System.out.printf("Could not retrieve all basic blocks comprised by function: %s\n", currentSub.getTerm().getName());
         }
 
-        return blocks;
+        return blockTerms;
+    }
+
+
+    protected void handlePossibleDefinitionAtEndOfBlock(Term<Blk> lastBlockTerm, CodeBlock currentBlock) {
+        if(lastInstructionIsDef(lastBlockTerm)) {
+            String destinationAddress = getGotoAddressForDestination(currentBlock);
+            if(destinationAddress != null) {
+                String instrAddress = lastBlockTerm.getTerm().getDefs().get(lastBlockTerm.getTerm().getDefs().size()-1).getTid().getAddress();
+                addJumpToCurrentBlock(lastBlockTerm.getTerm(), instrAddress, getGotoAddressForDestination(currentBlock), null);
+            }
+        }
+    }
+
+
+    protected String getGotoAddressForDestination(CodeBlock currentBlock) {
+        try {
+            CodeBlockReferenceIterator destinations = currentBlock.getDestinations(getMonitor());
+            if(destinations.hasNext()) {
+                return destinations.next().getDestinationAddress().toString();
+            }
+        } catch (CancelledException e) {
+            System.out.printf("Could not retrieve destinations for codeBlock at: %s\n", currentBlock.getFirstStartAddress());
+        }
+
+        return null;
     }
 
 
@@ -171,12 +185,12 @@ public class PcodeExtractor extends GhidraScript {
         blocks.add(block);
 
         for (Instruction instr : instructions) {
-            protoIteratePcode(blocks, instr, instructionIndex, numberOfInstructionsInBlock);
+            processPcode(blocks, instr, instructionIndex, numberOfInstructionsInBlock);
             instructionIndex++;
         }
 
         if (blocks.get(0).getTerm().getDefs().isEmpty() && blocks.get(0).getTerm().getJmps().isEmpty()) {
-            blocks.get(0).getTerm().addJmp(handleEmptyBlock(codeBlock));
+            handleEmptyBlock(blocks, codeBlock);
         }
 
         return blocks;
@@ -187,51 +201,34 @@ public class PcodeExtractor extends GhidraScript {
      * @param codeBlock: Current empty block
      * @return New jmp term containing fall through address
      */
-    protected Term<Jmp> handleEmptyBlock(CodeBlock codeBlock) {
-        Tid jmpTid = new Tid(String.format("instr_%s_%s", codeBlock.getFirstStartAddress().toString(), 0), codeBlock.getFirstStartAddress().toString());
-        Tid gotoTid = new Tid();
+    protected void handleEmptyBlock(ArrayList<Term<Blk>> blocks, CodeBlock codeBlock) {
         try {
             CodeBlockReferenceIterator destinations = codeBlock.getDestinations(getMonitor());
-            while (destinations.hasNext()) {
+            if(destinations.hasNext()) {
+                Tid jmpTid = new Tid(String.format("instr_%s_%s", codeBlock.getFirstStartAddress().toString(), 0), codeBlock.getFirstStartAddress().toString());
+                Tid gotoTid = new Tid();
                 String destAddr = destinations.next().getDestinationBlock().getFirstStartAddress().toString();
                 gotoTid.setId(String.format("blk_%s", destAddr));
                 gotoTid.setAddress(destAddr);
-                break;
+                blocks.get(0).getTerm().addJmp(new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, "BRANCH", new Label((Tid) gotoTid), 0)));
             }
         } catch (CancelledException e) {
             System.out.printf("Could not retrieve destinations for block at: %s\n", codeBlock.getFirstStartAddress().toString());
         }
-        return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, "BRANCH", new Label((Tid) gotoTid), 0));
     }
 
 
-    protected void protoIteratePcode(ArrayList<Term<Blk>> blocks, Instruction instruction, int instructionIndex, long numberOfInstructionsInBlock) {
+    protected void processPcode(ArrayList<Term<Blk>> blocks, Instruction instruction, int instructionIndex, long numberOfInstructionsInBlock) {
         PcodeOp[] ops = instruction.getPcode(true);
         if(ops.length == 0) {
-            protoAddJumpToCurrentBlock(blocks.get(blocks.size()-1).getTerm(), instruction.getAddress().toString(), instruction.getFallThrough().toString(), null);
+            addJumpToCurrentBlock(blocks.get(blocks.size()-1).getTerm(), instruction.getAddress().toString(), instruction.getFallThrough().toString(), null);
             return;
         }
-        int numberOfPcodeOps = ops.length;
+
         ArrayList<Term<Def>> temporaryDefStorage = new ArrayList<Term<Def>>();
-        Boolean intraInstructionJumpOccured = false;
+        Boolean intraInstructionJumpOccured = iteratePcode(blocks, temporaryDefStorage, instruction, instructionIndex, numberOfInstructionsInBlock, ops);
 
-        for(int pcodeIndex = 0; pcodeIndex < numberOfPcodeOps; pcodeIndex++) {
-            PcodeOp pcodeOp = ops[pcodeIndex];
-            String mnemonic = pcodeOp.getMnemonic();
-
-            if (this.jumps.contains(mnemonic)) {
-                intraInstructionJumpOccured = protoProcessJump(blocks, instruction, pcodeOp, mnemonic, temporaryDefStorage, instructionIndex, numberOfInstructionsInBlock, numberOfPcodeOps, pcodeIndex, intraInstructionJumpOccured);
-            } else {
-                temporaryDefStorage.add(createDefTerm(pcodeIndex, pcodeOp, instruction.getAddress()));
-            }
-        }
-
-        if(intraInstructionJumpOccured) {
-            Term<Blk> lastBlock = blocks.get(blocks.size() - 1);
-            if(!temporaryDefStorage.isEmpty()) {
-                handleMissingJumpAfterInstructionSplit(blocks, lastBlock, temporaryDefStorage, instruction);
-            }
-        }
+        fixControlFlowWhenIntraInstructionJumpOccured(intraInstructionJumpOccured, blocks, temporaryDefStorage, instruction);
 
         if(!temporaryDefStorage.isEmpty()) {
             blocks.get(blocks.size() - 1).getTerm().addMultipleDefs(temporaryDefStorage);
@@ -239,60 +236,98 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
-    protected void handleMissingJumpAfterInstructionSplit(ArrayList<Term<Blk>> blocks, Term<Blk> lastBlock, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction) {
+    protected Boolean iteratePcode(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction, int instructionIndex, long numberOfInstructionsInBlock, PcodeOp[] ops) {
+        int numberOfPcodeOps = ops.length;
+        Boolean intraInstructionJumpOccured = false;
+        for(int pcodeIndex = 0; pcodeIndex < numberOfPcodeOps; pcodeIndex++) {
+            PcodeOp pcodeOp = ops[pcodeIndex];
+            String mnemonic = pcodeOp.getMnemonic();
+            if (this.jumps.contains(mnemonic)) {
+                intraInstructionJumpOccured = processJump(blocks, instruction, pcodeOp, mnemonic, temporaryDefStorage, instructionIndex, numberOfInstructionsInBlock, numberOfPcodeOps, pcodeIndex, intraInstructionJumpOccured);
+            } else {
+                temporaryDefStorage.add(createDefTerm(pcodeIndex, pcodeOp, instruction.getAddress()));
+            }
+        }
+
+        return intraInstructionJumpOccured;
+    }
+
+
+    protected void fixControlFlowWhenIntraInstructionJumpOccured(Boolean intraInstructionJumpOccured, ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction) {
+        // A block is split when a Pcode Jump Instruction occurs in the PcodeBlock. 
+        // A jump is added to the end of the split block to the pcode block of the next assembly instruction
+        if(intraInstructionJumpOccured) {
+            Term<Blk> lastBlock = blocks.get(blocks.size() - 1);
+            if(!temporaryDefStorage.isEmpty()) {
+                addMissingJumpAfterInstructionSplit(blocks, lastBlock, temporaryDefStorage, instruction);
+            }
+        }
+    }
+
+
+    protected void addMissingJumpAfterInstructionSplit(ArrayList<Term<Blk>> blocks, Term<Blk> lastBlock, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction) {
         lastBlock.getTerm().addMultipleDefs(temporaryDefStorage);
-        protoAddJumpToCurrentBlock(lastBlock.getTerm(), instruction.getAddress().toString(), instruction.getFallThrough().toString(), null);
+        addJumpToCurrentBlock(lastBlock.getTerm(), instruction.getAddress().toString(), instruction.getFallThrough().toString(), null);
         blocks.add(createBlkTerm(instruction.getFallThrough().toString(), null));
         temporaryDefStorage.clear();
     }
 
 
-    protected Boolean protoProcessJump(ArrayList<Term<Blk>> blocks, Instruction instruction, PcodeOp pcodeOp, String mnemonic, ArrayList<Term<Def>> temporaryDefStorage, 
+    protected Boolean processJump(ArrayList<Term<Blk>> blocks, Instruction instruction, PcodeOp pcodeOp, String mnemonic, ArrayList<Term<Def>> temporaryDefStorage, 
     int instructionIndex, long numberOfInstructionsInBlock, int numberOfPcodeOps, int pcodeIndex, Boolean intraInstructionJumpOccured) {
 
         int currentBlockCount = blocks.size();
         Term<Blk> currentBlock = blocks.get(currentBlockCount - 1);
 
         if(pcodeIndex < numberOfPcodeOps - 1) {
-            if(!isCall(pcodeOp)) {
-                intraInstructionJumpOccured = true;
-                protoHandleIntraInstructionJump(blocks, temporaryDefStorage, currentBlock.getTerm(), instruction, pcodeOp, pcodeIndex, instructionIndex);
-            } else {
-                handleCallReturnPair(blocks, temporaryDefStorage, currentBlock, instruction, pcodeOp, pcodeIndex);
-            }
+            intraInstructionJumpOccured = processJumpInPcodeBlock(blocks, instruction, pcodeOp, mnemonic, temporaryDefStorage, instructionIndex, 
+            numberOfInstructionsInBlock, numberOfPcodeOps, pcodeIndex, intraInstructionJumpOccured, currentBlock);
+            temporaryDefStorage.clear();
         } else {
-            // Case 2: jump at the end of pcode group but not end of ghidra generated block.
-            if(instructionIndex < numberOfInstructionsInBlock - 1) {
-                blocks.add(createBlkTerm(instruction.getFallThrough().toString(), null));
-            }
-            // Case 3: jmp at last pcode op at last instruction in ghidra generated block
-            // If Case 2 is true, the 'currentBlk' will be the second to last block as the new block is for the next instruction
-            if(pcodeOp.getOpcode() == PcodeOp.RETURN && currentBlock.getTid().getId().endsWith("_r")) {
-                redirectCallReturn(currentBlock, instruction, pcodeOp);
-                return intraInstructionJumpOccured;
-            }
-            currentBlock.getTerm().addMultipleDefs(temporaryDefStorage);
-            currentBlock.getTerm().addJmp(createJmpTerm(instruction, pcodeIndex, pcodeOp, mnemonic, instruction.getAddress()));
+            processJumpAtEndOfPcodeBlocks(blocks, instruction, pcodeOp, mnemonic, temporaryDefStorage, instructionIndex, 
+            numberOfInstructionsInBlock, numberOfPcodeOps, pcodeIndex, intraInstructionJumpOccured, currentBlock);
         }
+
+        return intraInstructionJumpOccured;
+    }
+
+
+    protected Boolean processJumpAtEndOfPcodeBlocks(ArrayList<Term<Blk>> blocks, Instruction instruction, PcodeOp pcodeOp, String mnemonic, ArrayList<Term<Def>> temporaryDefStorage, 
+    int instructionIndex, long numberOfInstructionsInBlock, int numberOfPcodeOps, int pcodeIndex, Boolean intraInstructionJumpOccured, Term<Blk> currentBlock) {
+        // Case 2: jump at the end of pcode group but not end of ghidra generated block.
+        if(instructionIndex < numberOfInstructionsInBlock - 1) {
+            blocks.add(createBlkTerm(instruction.getFallThrough().toString(), null));
+        }
+        // Case 3: jmp at last pcode op at last instruction in ghidra generated block
+        // If Case 2 is true, the 'currentBlk' will be the second to last block as the new block is for the next instruction
+        if(pcodeOp.getOpcode() == PcodeOp.RETURN && currentBlock.getTid().getId().endsWith("_r")) {
+            redirectCallReturn(currentBlock, instruction, pcodeOp);
+            return intraInstructionJumpOccured;
+        }
+        currentBlock.getTerm().addMultipleDefs(temporaryDefStorage);
+        currentBlock.getTerm().addJmp(createJmpTerm(instruction, pcodeIndex, pcodeOp, mnemonic, instruction.getAddress()));
         temporaryDefStorage.clear();
 
         return intraInstructionJumpOccured;
     }
 
 
-    protected void protoHandleIntraInstructionJump(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Blk currentBlock, Instruction instruction, PcodeOp pcodeOp, int pcodeIndex, int instructionIndex) {
-        if(instructionIndex > 0) {
-            if(currentBlock.getDefs().size() == 0 && currentBlock.getJmps().size() == 0) {
-                currentBlock.addMultipleDefs(temporaryDefStorage);
-                currentBlock.addJmp(createJmpTerm(instruction, pcodeIndex, pcodeOp, pcodeOp.getMnemonic(), instruction.getAddress()));
-            } else {
-                if(temporaryDefStorage.size() > 0) {
-                    protoAddJumpToCurrentBlock(currentBlock, instruction.getFallFrom().toString(), instruction.getAddress().toString(), "0");
-                } else {
-                    protoAddJumpToCurrentBlock(currentBlock, instruction.getFallFrom().toString(), instruction.getAddress().toString(), null);
-                }
-                protoCreateNewBlockForIntraInstructionJump(blocks, temporaryDefStorage, instruction, pcodeIndex, pcodeOp);
-            }
+    protected Boolean processJumpInPcodeBlock(ArrayList<Term<Blk>> blocks, Instruction instruction, PcodeOp pcodeOp, String mnemonic, ArrayList<Term<Def>> temporaryDefStorage, 
+    int instructionIndex, long numberOfInstructionsInBlock, int numberOfPcodeOps, int pcodeIndex, Boolean intraInstructionJumpOccured, Term<Blk> currentBlock) {
+        if(!isCall(pcodeOp)) {
+            intraInstructionJumpOccured = true;
+            handleIntraInstructionJump(blocks, temporaryDefStorage, currentBlock.getTerm(), instruction, pcodeOp, pcodeIndex, instructionIndex);
+        } else {
+            handleCallReturnPair(blocks, temporaryDefStorage, currentBlock, instruction, pcodeOp, pcodeIndex);
+        }
+
+        return intraInstructionJumpOccured;
+    }
+
+
+    protected void handleIntraInstructionJump(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Blk currentBlock, Instruction instruction, PcodeOp pcodeOp, int pcodeIndex, int instructionIndex) {
+        if(instructionIndex > 0 && !(currentBlock.getDefs().size() == 0 && currentBlock.getJmps().size() == 0)) {
+            jumpFromPreviousInstructionToNewBlock(blocks, temporaryDefStorage, currentBlock, instruction, pcodeOp, pcodeIndex, instructionIndex);
         } else {
             currentBlock.addMultipleDefs(temporaryDefStorage);
             currentBlock.addJmp(createJmpTerm(instruction, pcodeIndex, pcodeOp, pcodeOp.getMnemonic(), instruction.getAddress()));
@@ -302,12 +337,22 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    protected void jumpFromPreviousInstructionToNewBlock(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Blk currentBlock, Instruction instruction, PcodeOp pcodeOp, int pcodeIndex, int instructionIndex) {
+        if(temporaryDefStorage.size() > 0) {
+            addJumpToCurrentBlock(currentBlock, instruction.getFallFrom().toString(), instruction.getAddress().toString(), "0");
+        } else {
+            addJumpToCurrentBlock(currentBlock, instruction.getFallFrom().toString(), instruction.getAddress().toString(), null);
+        }
+        createNewBlockForIntraInstructionJump(blocks, temporaryDefStorage, instruction, pcodeIndex, pcodeOp);
+    }
+
+
     protected Boolean isCall(PcodeOp pcodeOp){
         return (pcodeOp.getOpcode() == PcodeOp.CALL || pcodeOp.getOpcode() == PcodeOp.CALLIND);
     }
 
 
-    protected void protoCreateNewBlockForIntraInstructionJump(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction, int pcodeIndex, PcodeOp pcodeOp){
+    protected void createNewBlockForIntraInstructionJump(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction, int pcodeIndex, PcodeOp pcodeOp){
         // Set the starting index of the new block to the first pcode instruction of the assembly instruction
         int nextBlockStartIndex;
         Term<Blk> newBlock;
@@ -323,7 +368,7 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
-    protected void protoAddJumpToCurrentBlock(Blk currentBlock, String jmpAddress, String gotoAddress, String suffix) {
+    protected void addJumpToCurrentBlock(Blk currentBlock, String jmpAddress, String gotoAddress, String suffix) {
         int artificialJmpIndex;
         if(currentBlock.getDefs().size() == 0) {
             artificialJmpIndex = 1;
@@ -341,7 +386,7 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
-    protected Boolean protoLastInstructionIsDef(Term<Blk> block) {
+    protected Boolean lastInstructionIsDef(Term<Blk> block) {
         ArrayList<Term<Jmp>> jumps = block.getTerm().getJmps();
         ArrayList<Term<Def>> defs = block.getTerm().getDefs();
 
@@ -396,20 +441,32 @@ public class PcodeExtractor extends GhidraScript {
      */
     protected Term<Program> createProgramTerm() {
         Tid progTid = new Tid(String.format("prog_%s", ghidraProgram.getMinAddress().toString()), ghidraProgram.getMinAddress().toString());
-        ArrayList<ExternSymbol> externalSymbols = new ArrayList<ExternSymbol>();
         SymbolTable symTab = ghidraProgram.getSymbolTable();
-        AddressIterator entryPoints = symTab.getExternalEntryPointIterator();
+        return new Term<Program>(progTid, new Program(new ArrayList<Term<Sub>>(), addExternalSymbols(symTab), addEntryPoints(symTab)));
+    }
+
+
+    protected ArrayList<Tid> addEntryPoints(SymbolTable symTab) {
         ArrayList<Tid> entryTids = new ArrayList<Tid>();
+        AddressIterator entryPoints = symTab.getExternalEntryPointIterator();
         while (entryPoints.hasNext()) {
             Address entry = entryPoints.next();
             entryTids.add(new Tid(String.format("sub_%s", entry.toString()), entry.toString()));
         }
+
+        return entryTids;
+    }
+
+
+    protected ArrayList<ExternSymbol> addExternalSymbols(SymbolTable symTab) {
+        ArrayList<ExternSymbol> externalSymbols = new ArrayList<ExternSymbol>();
         SymbolIterator symExtern = symTab.getExternalSymbols();
         while (symExtern.hasNext()) {
             Symbol ex = symExtern.next();
             externalSymbols.add(createExternSymbol(ex));
         }
-        return new Term<Program>(progTid, new Program(new ArrayList<Term<Sub>>(), externalSymbols, entryTids));
+
+        return externalSymbols;
     }
 
 
@@ -670,30 +727,37 @@ public class PcodeExtractor extends GhidraScript {
      * and for branches of a blk TID.
      */
     protected Label createLabel(String mnemonic, PcodeOp pcodeOp, Address fallThrough) {
+        Label jumpLabel;
         if (fallThrough == null) {
-            if (mnemonic.equals("CALLIND")) {
-                Tid subTid = getTargetTid(pcodeOp.getInput(0));
-                if (subTid != null) {
-                    return new Label(subTid);
-                } else {
-                    return new Label((Variable) createVariable(pcodeOp.getInput(0)));
-                }
+            switch(mnemonic) {
+                case "CALLIND": 
+                    jumpLabel = handleLabelsForIndirectCalls(pcodeOp);
+                    break;
+                case "BRANCHIND":
+                case "RETURN":
+                    jumpLabel = new Label((Variable) createVariable(pcodeOp.getInput(0)));
+                    break;
+                case "CALL":
+                case "CALLOTHER":
+                    jumpLabel = new Label((Tid) new Tid(String.format("sub_%s", pcodeOp.getInput(0).getAddress().toString()), pcodeOp.getInput(0).getAddress().toString()));
+                    break;
+                default:
+                    jumpLabel = new Label((Tid) new Tid(String.format("blk_%s", pcodeOp.getInput(0).getAddress().toString()), pcodeOp.getInput(0).getAddress().toString()));
+                    break;
             }
-
-            if (mnemonic.equals("BRANCHIND") || mnemonic.equals("RETURN")) {
-                return new Label((Variable) createVariable(pcodeOp.getInput(0)));
-            }
-
-            if (mnemonic.equals("CALL") || mnemonic.equals("CALLOTHER")) {
-                return new Label((Tid) new Tid(String.format("sub_%s", pcodeOp.getInput(0).getAddress().toString()), pcodeOp.getInput(0).getAddress().toString()));
-            }
-
-            if (mnemonic.equals("BRANCH") || mnemonic.equals("CBRANCH")) {
-                return new Label((Tid) new Tid(String.format("blk_%s", pcodeOp.getInput(0).getAddress().toString()), pcodeOp.getInput(0).getAddress().toString()));
-            }
+            return jumpLabel;
         }
 
         return new Label((Tid) new Tid(String.format("blk_%s", fallThrough.toString()), fallThrough.toString()));
+    }
+
+
+    protected Label handleLabelsForIndirectCalls(PcodeOp pcodeOp) {
+        Tid subTid = getTargetTid(pcodeOp.getInput(0));
+        if (subTid != null) {
+            return new Label(subTid);
+        }
+        return new Label((Variable) createVariable(pcodeOp.getInput(0)));
     }
 
 
