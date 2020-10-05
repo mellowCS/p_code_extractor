@@ -54,6 +54,7 @@ public class PcodeExtractor extends GhidraScript {
     FunctionManager funcMan;
     ghidra.program.model.listing.Program ghidraProgram;
     VarnodeContext context;
+    String cpuArch;
 
     Set<String> binOps = EnumUtils.getEnumMap(ExecutionType.BinOpType.class).keySet();
     Set<String> unOps = EnumUtils.getEnumMap(ExecutionType.UnOpType.class).keySet();
@@ -70,10 +71,10 @@ public class PcodeExtractor extends GhidraScript {
         SimpleBlockModel simpleBM = new SimpleBlockModel(ghidraProgram);
         Listing listing = ghidraProgram.getListing();
         context = new VarnodeContext(ghidraProgram, ghidraProgram.getProgramContext(), ghidraProgram.getProgramContext());
-        String cpuArch = getCpuArchitecture();
+        cpuArch = getCpuArchitecture();
 
         program = createProgramTerm();
-        Project project = createProject(cpuArch);
+        Project project = createProject();
         program = iterateFunctions(simpleBM, listing);
 
         String jsonPath = getScriptArgs()[0];
@@ -420,7 +421,7 @@ public class PcodeExtractor extends GhidraScript {
      * <p>
      * Creates the project object and adds the stack pointer register and program term.
      */
-    protected Project createProject(String cpuArch) {
+    protected Project createProject() {
         Project project = new Project();
         CompilerSpec comSpec = currentProgram.getCompilerSpec();
         Register stackPointerRegister = comSpec.getStackPointer();
@@ -543,7 +544,7 @@ public class PcodeExtractor extends GhidraScript {
             args.add(specifyArg(param));
         }
         if (!hasVoidReturn(func)) {
-            args.add(new Arg(createVariable(func.getReturn().getFirstStorageVarnode()), "OUTPUT"));
+            args.add(new Arg(createVariable(func.getReturn().getFirstStorageVarnode(), true), "OUTPUT"));
         }
 
         return args;
@@ -559,13 +560,12 @@ public class PcodeExtractor extends GhidraScript {
     protected Arg specifyArg(Parameter param) {
         Arg arg = new Arg();
         if (param.isStackVariable()) {
-            Variable stackVar = createVariable(param.getFirstStorageVarnode());
+            Variable stackVar = createVariable(param.getFirstStorageVarnode(), true);
             arg.setLocation(new Expression("LOAD", stackVar));
-            arg.setIntent("INPUT");
         } else if (param.isRegisterVariable()) {
-            arg.setVar(createVariable(param.getFirstStorageVarnode()));
-            arg.setIntent("INPUT");
+            arg.setVar(createVariable(param.getFirstStorageVarnode(), true));
         }
+        arg.setIntent("INPUT");
 
         return arg;
     }
@@ -614,7 +614,7 @@ public class PcodeExtractor extends GhidraScript {
     protected Term<Jmp> createJmpTerm(Instruction instr, int pCodeCount, PcodeOp pcodeOp, String mnemonic, Address instrAddr) {
         Tid jmpTid = new Tid(String.format("instr_%s_%s", instrAddr.toString(), pCodeCount), instrAddr.toString());
         if (mnemonic.equals("CBRANCH")) {
-            return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, mnemonic, createLabel(mnemonic, pcodeOp, null), createVariable(pcodeOp.getInput(1)), pCodeCount));
+            return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, mnemonic, createLabel(mnemonic, pcodeOp, null), createVariable(pcodeOp.getInput(1), false), pCodeCount));
         } else if (mnemonic.equals("BRANCH") || mnemonic.equals("BRANCHIND")) {
             return new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.GOTO, mnemonic, createLabel(mnemonic, pcodeOp, null), pCodeCount));
         } else if (mnemonic.equals("RETURN")) {
@@ -653,9 +653,9 @@ public class PcodeExtractor extends GhidraScript {
             return new Term<Def>(defTid, new Def(createExpression(pcodeOp), pcodeIndex));
             // cast copy instructions that have address outputs into store instructions
         } else if (pcodeOp.getMnemonic().equals("COPY") && pcodeOp.getOutput().isAddress()) {
-            return new Term<Def>(defTid, new Def(new Expression("STORE", null, createVariable(pcodeOp.getOutput()), createVariable(pcodeOp.getInput(0))), pcodeIndex));
+            return new Term<Def>(defTid, new Def(new Expression("STORE", null, createVariable(pcodeOp.getOutput(), false), createVariable(pcodeOp.getInput(0), false)), pcodeIndex));
         }
-        return new Term<Def>(defTid, new Def(createVariable(pcodeOp.getOutput()), createExpression(pcodeOp), pcodeIndex));
+        return new Term<Def>(defTid, new Def(createVariable(pcodeOp.getOutput(), false), createExpression(pcodeOp), pcodeIndex));
     }
 
 
@@ -667,10 +667,14 @@ public class PcodeExtractor extends GhidraScript {
      * In case it is a virtual register, prefix the name with $U.
      * In case it is a constant, remove the const prefix from the constant.
      */
-    protected Variable createVariable(Varnode node) {
+    protected Variable createVariable(Varnode node, Boolean isArgument) {
         Variable var = new Variable();
         if (node.isRegister()) {
-            var.setName(getRegisterMnemonic(node));
+            String mnemonic = getRegisterMnemonic(node);
+            if(isArgument && mnemonic.equals("AL")){
+                return castToFullRegister(var, node);
+            }
+            var.setName(mnemonic);
             var.setIsVirtual(false);
         } else if (node.isUnique()) {
             var.setName(renameVirtualRegister(node.getAddress().toString()));
@@ -692,6 +696,18 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    protected Variable castToFullRegister(Variable var, Varnode node) {
+        if(cpuArch.equals("x86_32")) {
+            var.setName("EAX");
+            var.setSize(4);
+        } else {
+            var.setName("RAX");
+            var.setSize(8);
+        }
+        return var;
+    }
+
+
     /**
      * @param pcodeOp: Pcode instruction
      * @return: new Epxression
@@ -703,7 +719,7 @@ public class PcodeExtractor extends GhidraScript {
         List<Variable> in = new ArrayList<Variable>();
 
         for (Varnode input : pcodeOp.getInputs()) {
-            in.add(createVariable(input));
+            in.add(createVariable(input, false));
         }
 
         int inputLen = in.size();
@@ -735,7 +751,7 @@ public class PcodeExtractor extends GhidraScript {
                     break;
                 case "BRANCHIND":
                 case "RETURN":
-                    jumpLabel = new Label((Variable) createVariable(pcodeOp.getInput(0)));
+                    jumpLabel = new Label((Variable) createVariable(pcodeOp.getInput(0), false));
                     break;
                 case "CALL":
                 case "CALLOTHER":
@@ -757,7 +773,7 @@ public class PcodeExtractor extends GhidraScript {
         if (subTid != null) {
             return new Label(subTid);
         }
-        return new Label((Variable) createVariable(pcodeOp.getInput(0)));
+        return new Label((Variable) createVariable(pcodeOp.getInput(0), false));
     }
 
 
