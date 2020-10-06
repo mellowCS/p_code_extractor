@@ -704,6 +704,7 @@ public class PcodeExtractor extends GhidraScript {
             var.setName("RAX");
             var.setSize(8);
         }
+        var.setIsVirtual(false);
         return var;
     }
 
