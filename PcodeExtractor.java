@@ -802,6 +802,10 @@ public class PcodeExtractor extends GhidraScript {
      * Creates a Call object, using a target and return Label.
      */
     protected Call createCall(Instruction instr, String mnemonic, PcodeOp pcodeOp) {
+        if(mnemonic.equals("CALLOTHER")) {
+            String callString = ghidraProgram.getLanguage().getUserDefinedOpName((int) pcodeOp.getInput(0).getOffset());
+            return new Call(createLabel(mnemonic, pcodeOp, null), createLabel(mnemonic, pcodeOp, instr.getFallThrough()), callString);
+        }
         return new Call(createLabel(mnemonic, pcodeOp, null), createLabel(mnemonic, pcodeOp, instr.getFallThrough()));
     }
 
