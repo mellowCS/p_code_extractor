@@ -7,6 +7,8 @@ public class Call {
     private Label target;
     @SerializedName("return")
     private Label return_;
+    @SerializedName("call_string")
+    private String callString;
 
     public Call() {
     }
@@ -18,6 +20,12 @@ public class Call {
     public Call(Label target, Label return_) {
         this.setTarget(target);
         this.setReturn_(return_);
+    }
+
+    public Call(Label target, Label return_, String callString) {
+        this.setTarget(target);
+        this.setReturn_(return_);
+        this.setCallString(callString);
     }
 
     public Label getTarget() {
@@ -34,5 +42,13 @@ public class Call {
 
     public void setReturn_(Label return_) {
         this.return_ = return_;
+    }
+
+    public String getCallString() {
+        return callString;
+    }
+
+    public void setCallString(String callString) {
+        this.callString = callString;
     }
 }
