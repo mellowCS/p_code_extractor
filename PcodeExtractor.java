@@ -33,6 +33,7 @@ import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
+import ghidra.program.model.symbol.SymbolType;
 import ghidra.program.model.symbol.SymbolIterator;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.util.VarnodeContext;
@@ -460,14 +461,34 @@ public class PcodeExtractor extends GhidraScript {
 
 
     protected ArrayList<ExternSymbol> addExternalSymbols(SymbolTable symTab) {
-        ArrayList<ExternSymbol> externalSymbols = new ArrayList<ExternSymbol>();
-        SymbolIterator symExtern = symTab.getExternalSymbols();
-        while (symExtern.hasNext()) {
-            Symbol ex = symExtern.next();
-            externalSymbols.add(createExternSymbol(ex));
+        ArrayList<ExternSymbol> extSym = new ArrayList<ExternSymbol>();
+        ArrayList<Symbol> externalSymbols = new ArrayList<Symbol>();
+        ArrayList<Symbol> definedSymbols = new ArrayList<Symbol>();
+        symTab.getExternalSymbols().forEachRemaining(externalSymbols::add);
+        symTab.getDefinedSymbols().forEachRemaining(definedSymbols::add);
+        for(Symbol def : definedSymbols) {
+            for(Symbol ext : externalSymbols) {
+                if(def.getName().equals(ext.getName()) && !def.getAddress().toString().startsWith("EXTERNAL:") && def.getSymbolType() == SymbolType.FUNCTION && notInReferences(def)) {
+                    extSym.add(createExternSymbol(def));
+                    break;
+                }
+            }
         }
 
-        return externalSymbols;
+        return extSym;
+    }
+
+
+    protected Boolean notInReferences(Symbol sym) {
+        for(Reference ref : sym.getReferences()) {
+            if(funcMan.getFunctionContaining(ref.getFromAddress()) != null) {
+                if(funcMan.getFunctionContaining(ref.getFromAddress()).getName().equals(sym.getName())) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
 
@@ -478,33 +499,11 @@ public class PcodeExtractor extends GhidraScript {
      * Creates an external symbol with an unique TID, a calling convention and argument objects.
      */
     protected ExternSymbol createExternSymbol(Symbol symbol) {
-        Symbol libSym = getInternalCaller(symbol);
-        Tid tid = new Tid(String.format("sub_%s", libSym.getAddress().toString()), libSym.getAddress().toString());
-        ArrayList<Arg> args = createArguments(libSym);
-        Boolean noReturn = funcMan.getFunctionAt(libSym.getAddress()).hasNoReturn();
-        return new ExternSymbol(tid, libSym.getAddress().toString(), libSym.getName(), funcMan.getDefaultCallingConvention().getName(), args, noReturn);
+        Tid tid = new Tid(String.format("sub_%s", symbol.getAddress().toString()), symbol.getAddress().toString());
+        ArrayList<Arg> args = createArguments(symbol);
+        Boolean noReturn = funcMan.getFunctionAt(symbol.getAddress()).hasNoReturn();
+        return new ExternSymbol(tid, symbol.getAddress().toString(), symbol.getName(), funcMan.getDefaultCallingConvention().getName(), args, noReturn);
 
-    }
-
-
-    /**
-     * @param symbol:  External symbol
-     * @return: internally called symbol for external symbol
-     * 
-     * Gets the internally called Thunk Function for an external symbol.
-     */
-    protected Symbol getInternalCaller(Symbol symbol) {
-        SymbolIterator symDefined = ghidraProgram.getSymbolTable().getDefinedSymbols();
-        Symbol candidate = symbol;
-        while (symDefined.hasNext()) {
-            Symbol def = symDefined.next();
-            if (def.getName().equals(symbol.getName()) && !def.isExternal()) {
-                if (!isThunkFunctionRef(def)) {
-                    candidate = def;
-                }
-            }
-        }
-        return candidate;
     }
 
 
