@@ -34,7 +34,6 @@ import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
 import ghidra.program.model.symbol.SymbolType;
-import ghidra.program.model.symbol.SymbolIterator;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.util.VarnodeContext;
 import ghidra.util.exception.CancelledException;
@@ -88,7 +87,7 @@ public class PcodeExtractor extends GhidraScript {
 
     /**
      * @return: CPU architecture as string.
-     * <p>
+     * 
      * Uses Ghidra's language id to extract the CPU arch as "arch-bits" e.g. x86_64, x86_32 etc.
      */
     protected String getCpuArchitecture() {
@@ -102,7 +101,7 @@ public class PcodeExtractor extends GhidraScript {
      * @param simpleBM: Simple Block Model to iterate over blocks
      * @param listing:  Listing to get assembly instructions
      * @return: Processed Program Term
-     * <p>
+     * 
      * Iterates over functions to create sub terms and calls the block iterator to add all block terms to each subroutine.
      */
     protected Term<Program> iterateFunctions(SimpleBlockModel simpleBM, Listing listing) {
@@ -124,7 +123,7 @@ public class PcodeExtractor extends GhidraScript {
      * @param simpleBM:   Simple Block Model to iterate over blocks
      * @param listing:    Listing to get assembly instructions
      * @return: new ArrayList of Blk Terms
-     * <p>
+     * 
      * Iterates over all blocks and calls the instruction iterator to add def and jmp terms to each block.
      */
     protected ArrayList<Term<Blk>> iterateBlocks(Term<Sub> currentSub, SimpleBlockModel simpleBM, Listing listing) {
@@ -146,17 +145,30 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * @param lastBlockTerm: latest generated block term
+     * @param currentBlock: current code block from which the block term was generated
+     * 
+     * Checks whether the latest generated block term ends on a definition and gets the first
+     * destination address of the current code block, if available, to create an artificial jump
+     */
     protected void handlePossibleDefinitionAtEndOfBlock(Term<Blk> lastBlockTerm, CodeBlock currentBlock) {
         if(lastInstructionIsDef(lastBlockTerm)) {
             String destinationAddress = getGotoAddressForDestination(currentBlock);
             if(destinationAddress != null) {
                 String instrAddress = lastBlockTerm.getTerm().getDefs().get(lastBlockTerm.getTerm().getDefs().size()-1).getTid().getAddress();
-                addJumpToCurrentBlock(lastBlockTerm.getTerm(), instrAddress, getGotoAddressForDestination(currentBlock), null);
+                addJumpToCurrentBlock(lastBlockTerm.getTerm(), instrAddress, destinationAddress, null);
             }
         }
     }
 
 
+    /**
+     * @param currentBlock
+     * @return: goto address for jump
+     * 
+     * Checks whether a destination address exists
+     */
     protected String getGotoAddressForDestination(CodeBlock currentBlock) {
         try {
             CodeBlockReferenceIterator destinations = currentBlock.getDestinations(getMonitor());
@@ -174,10 +186,11 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param block:     Blk Term to be filled with instructions
      * @param listing:   Assembly instructions
-     * @param codeBlock: codeBlock for retrieving its instructions
-     * @return: new Blk Term
-     * <p>
-     * Iterates over pcode instructions and adds either jmp or def term depending on the mnemonic.
+     * @param codeBlock: codeBlock for retrieving instructions
+     * @return: new array of Blk Terms
+     * 
+     * Iterates over assembly instructions and processes each of the pcode blocks.
+     * Handles empty block by adding a jump Term with fallthrough address
      */
     protected ArrayList<Term<Blk>> iterateInstructions(Term<Blk> block, Listing listing, CodeBlock codeBlock) {
         int instructionIndex = 0;
@@ -202,6 +215,8 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param codeBlock: Current empty block
      * @return New jmp term containing fall through address
+     * 
+     * Adds fallthrough address jump to empty block if available
      */
     protected void handleEmptyBlock(ArrayList<Term<Blk>> blocks, CodeBlock codeBlock) {
         try {
@@ -220,9 +235,19 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * @param blocks: array of block terms 
+     * @param instruction: assembly instruction
+     * @param instructionIndex: index of the assembly instruction
+     * @param numberOfInstructionsInBlock: number of assembly instructions in Ghidra generated block
+     * 
+     * Checks whether the assembly instruction is a nop instruction and adds a jump to the block.
+     * Checks whether a jump occured within a ghidra generated pcode block and fixes the control flow
+     * by adding missing jumps between artificially generated blocks.
+     */
     protected void processPcode(ArrayList<Term<Blk>> blocks, Instruction instruction, int instructionIndex, long numberOfInstructionsInBlock) {
         PcodeOp[] ops = instruction.getPcode(true);
-        if(ops.length == 0) {
+        if(ops.length == 0 && !instruction.isInDelaySlot()) {
             addJumpToCurrentBlock(blocks.get(blocks.size()-1).getTerm(), instruction.getAddress().toString(), instruction.getFallThrough().toString(), null);
             return;
         }
@@ -238,6 +263,15 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * @param blocks: array of block terms
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param instruction: assembly instruction
+     * @param instructionIndex: index of assembly instruction
+     * @param numberOfInstructionsInBlock: number of assembly instructions in Ghidra generated block
+     * @param ops: pcode ops for current assembly instruction
+     * @return: indicator if jump occured within pcode block
+     */
     protected Boolean iteratePcode(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction, int instructionIndex, long numberOfInstructionsInBlock, PcodeOp[] ops) {
         int numberOfPcodeOps = ops.length;
         Boolean intraInstructionJumpOccured = false;
@@ -255,6 +289,14 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * @param intraInstructionJumpOccured: indicator if jump occured within pcode block
+     * @param blocks: array of block terms
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param instruction: assembly instruction
+     * 
+     * fixes the control flow by adding missing jumps between artificially generated blocks.
+     */
     protected void fixControlFlowWhenIntraInstructionJumpOccured(Boolean intraInstructionJumpOccured, ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction) {
         // A block is split when a Pcode Jump Instruction occurs in the PcodeBlock. 
         // A jump is added to the end of the split block to the pcode block of the next assembly instruction
@@ -267,6 +309,15 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * @param blocks: array of block terms
+     * @param lastBlock: last block before split
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param instruction: assembly instruction
+     * 
+     * Adds a missing jump after a Ghidra generated block has been split to maintain the control flow
+     * between the blocks
+     */
     protected void addMissingJumpAfterInstructionSplit(ArrayList<Term<Blk>> blocks, Term<Blk> lastBlock, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction) {
         lastBlock.getTerm().addMultipleDefs(temporaryDefStorage);
         addJumpToCurrentBlock(lastBlock.getTerm(), instruction.getAddress().toString(), instruction.getFallThrough().toString(), null);
@@ -275,6 +326,23 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param blocks: array pf block terms
+     * @param instruction: assembly instruction
+     * @param pcodeOp: pcode instruction
+     * @param mnemonic: pcode mnemonic
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param instructionIndex: index of the current assembly instruction
+     * @param numberOfInstructionsInBlock: number of assembly instructions in Ghidra generated block
+     * @param numberOfPcodeOps: number of pcode instruction in pcode block
+     * @param pcodeIndex: index of current pcode instruction
+     * @param intraInstructionJumpOccured: indicator whether a jump occured inside a pcode block
+     * @return: indicator whether a jump occured inside a pcode block
+     * 
+     * Processes jump pcode instruction by checking where it occurs.
+     * Distinguishes between jumps inside a pcode block and jumps at the end of a pcode block
+     */
     protected Boolean processJump(ArrayList<Term<Blk>> blocks, Instruction instruction, PcodeOp pcodeOp, String mnemonic, ArrayList<Term<Def>> temporaryDefStorage, 
     int instructionIndex, long numberOfInstructionsInBlock, int numberOfPcodeOps, int pcodeIndex, Boolean intraInstructionJumpOccured) {
 
@@ -294,11 +362,29 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param blocks: array pf block terms
+     * @param instruction: assembly instruction
+     * @param pcodeOp: pcode instruction
+     * @param mnemonic: pcode mnemonic
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param instructionIndex: index of the current assembly instruction
+     * @param numberOfInstructionsInBlock: number of assembly instructions in Ghidra generated block
+     * @param numberOfPcodeOps: number of pcode instruction in pcode block
+     * @param pcodeIndex: index of current pcode instruction
+     * @param intraInstructionJumpOccured: indicator whether a jump occured inside a pcode block
+     * @param currentBlock: current block term
+     * @return: indicator whether a jump occured inside a pcode block
+     * 
+     * Process jumps at the end of pcode blocks
+     * If it is a return block, the call return address is changed to the current block
+     */
     protected Boolean processJumpAtEndOfPcodeBlocks(ArrayList<Term<Blk>> blocks, Instruction instruction, PcodeOp pcodeOp, String mnemonic, ArrayList<Term<Def>> temporaryDefStorage, 
     int instructionIndex, long numberOfInstructionsInBlock, int numberOfPcodeOps, int pcodeIndex, Boolean intraInstructionJumpOccured, Term<Blk> currentBlock) {
         // Case 2: jump at the end of pcode group but not end of ghidra generated block.
-        if(instructionIndex < numberOfInstructionsInBlock - 1) {
-            blocks.add(createBlkTerm(instruction.getFallThrough().toString(), null));
+        if(instructionIndex < numberOfInstructionsInBlock - 1 && instruction.getDelaySlotDepth() == 0) {
+            blocks.add(createBlkTerm(instruction.getNext().getAddress().toString(), null));
         }
         // Case 3: jmp at last pcode op at last instruction in ghidra generated block
         // If Case 2 is true, the 'currentBlk' will be the second to last block as the new block is for the next instruction
@@ -314,6 +400,23 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param blocks: array pf block terms
+     * @param instruction: assembly instruction
+     * @param pcodeOp: pcode instruction
+     * @param mnemonic: pcode mnemonic
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param instructionIndex: index of the current assembly instruction
+     * @param numberOfInstructionsInBlock: number of assembly instructions in Ghidra generated block
+     * @param numberOfPcodeOps: number of pcode instruction in pcode block
+     * @param pcodeIndex: index of current pcode instruction
+     * @param intraInstructionJumpOccured: indicator whether a jump occured inside a pcode block
+     * @param currentBlock: current block term
+     * @return: indicator whether a jump occured inside a pcode block
+     * 
+     * Processes a jump inside a pcode block and distinguishes between intra jumps and call return pairs.
+     */
     protected Boolean processJumpInPcodeBlock(ArrayList<Term<Blk>> blocks, Instruction instruction, PcodeOp pcodeOp, String mnemonic, ArrayList<Term<Def>> temporaryDefStorage, 
     int instructionIndex, long numberOfInstructionsInBlock, int numberOfPcodeOps, int pcodeIndex, Boolean intraInstructionJumpOccured, Term<Blk> currentBlock) {
         if(!isCall(pcodeOp)) {
@@ -327,6 +430,18 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param blocks: array pf block terms
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param currentBlock: current block term
+     * @param instruction: assembly instruction
+     * @param pcodeOp: pcode instruction
+     * @param pcodeIndex: index of current pcode instruction
+     * @param instructionIndex: index of the current assembly instruction
+     * 
+     * Adds an artificial jump to the previous block if an intra jump occurs and creates a new block.
+     */
     protected void handleIntraInstructionJump(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Blk currentBlock, Instruction instruction, PcodeOp pcodeOp, int pcodeIndex, int instructionIndex) {
         if(instructionIndex > 0 && !(currentBlock.getDefs().size() == 0 && currentBlock.getJmps().size() == 0)) {
             jumpFromPreviousInstructionToNewBlock(blocks, temporaryDefStorage, currentBlock, instruction, pcodeOp, pcodeIndex, instructionIndex);
@@ -339,6 +454,18 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param blocks: array pf block terms
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param currentBlock: current block term
+     * @param instruction: assembly instruction
+     * @param pcodeOp: pcode instruction
+     * @param pcodeIndex: index of current pcode instruction
+     * @param instructionIndex: index of the current assembly instruction
+     * 
+     * Adds a jump from the previous instruction to a new intra block
+     */
     protected void jumpFromPreviousInstructionToNewBlock(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Blk currentBlock, Instruction instruction, PcodeOp pcodeOp, int pcodeIndex, int instructionIndex) {
         if(temporaryDefStorage.size() > 0) {
             addJumpToCurrentBlock(currentBlock, instruction.getFallFrom().toString(), instruction.getAddress().toString(), "0");
@@ -349,11 +476,28 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param pcodeOp: pcode instruction
+     * @return: boolean whether current pcode instruction is a call
+     * 
+     * checks whether the current pcode instruction is a call
+     */
     protected Boolean isCall(PcodeOp pcodeOp){
         return (pcodeOp.getOpcode() == PcodeOp.CALL || pcodeOp.getOpcode() == PcodeOp.CALLIND);
     }
 
 
+    /**
+     * 
+     * @param blocks: array of block terms
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param instruction: assembly instruction
+     * @param pcodeIndex: index of current pcode instruction
+     * @param pcodeOp: pcode instruction
+     * 
+     * Creates a new block for the pcode instructions of the current assembly instruction and the intra jump
+     */
     protected void createNewBlockForIntraInstructionJump(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Instruction instruction, int pcodeIndex, PcodeOp pcodeOp){
         // Set the starting index of the new block to the first pcode instruction of the assembly instruction
         int nextBlockStartIndex;
@@ -370,6 +514,15 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param currentBlock: current block term
+     * @param jmpAddress: address of jump instruction
+     * @param gotoAddress: address of where to jump
+     * @param suffix: suffix for TID
+     * 
+     * Adds a jump to the current block.
+     */
     protected void addJumpToCurrentBlock(Blk currentBlock, String jmpAddress, String gotoAddress, String suffix) {
         int artificialJmpIndex;
         if(currentBlock.getDefs().size() == 0) {
@@ -388,6 +541,13 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param block: block term
+     * @return: boolean whether block ends on definition
+     * 
+     * Checks whether the current block term ends on a definition
+     */
     protected Boolean lastInstructionIsDef(Term<Blk> block) {
         ArrayList<Term<Jmp>> jumps = block.getTerm().getJmps();
         ArrayList<Term<Def>> defs = block.getTerm().getDefs();
@@ -399,6 +559,17 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param blocks: array of block terms
+     * @param temporaryDefStorage: temporarily stored definitions
+     * @param currentBlock: current block term
+     * @param instruction: assembly instruction
+     * @param pcodeOp: pcode instruction
+     * @param pcodeIndex: index of current pcode instruction
+     * 
+     * Handles call return pairs by creating a return block and redirecting the call's return to the return block
+     */
     protected void handleCallReturnPair(ArrayList<Term<Blk>> blocks, ArrayList<Term<Def>> temporaryDefStorage, Term<Blk> currentBlock, Instruction instruction, PcodeOp pcodeOp, int pcodeIndex) {
         currentBlock.getTerm().addMultipleDefs(temporaryDefStorage);
         Term<Jmp> jump = createJmpTerm(instruction, pcodeIndex, pcodeOp, pcodeOp.getMnemonic(), instruction.getAddress());
@@ -409,6 +580,14 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param currentBlock: current block term
+     * @param instruction: assembly instruction
+     * @param pcodeOp: pcode instruction
+     * 
+     * Redirects the call's return address to the artificially created return block
+     */
     protected void redirectCallReturn(Term<Blk> currentBlock, Instruction instruction, PcodeOp pcodeOp) {
         Tid jmpTid = new Tid(String.format("instr_%s_%s_r", instruction.getAddress().toString(), 0), instruction.getAddress().toString());
         Term<Jmp> ret = new Term<Jmp>(jmpTid, new Jmp(ExecutionType.JmpType.RETURN, pcodeOp.getMnemonic(), createLabel(pcodeOp.getMnemonic(), pcodeOp, null), 0));
@@ -419,7 +598,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param cpuArch: CPU architecture as string
      * @return: new Project
-     * <p>
+     * 
      * Creates the project object and adds the stack pointer register and program term.
      */
     protected Project createProject() {
@@ -438,7 +617,7 @@ public class PcodeExtractor extends GhidraScript {
 
     /**
      * @return: new Program Term
-     * <p>
+     * 
      * Creates the project term with an unique TID and adds external symbols.
      */
     protected Term<Program> createProgramTerm() {
@@ -448,6 +627,13 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param symTab: symbol table
+     * @return: list of program entry points
+     * 
+     * Creates a list of program entry points to add to the program term
+     */
     protected ArrayList<Tid> addEntryPoints(SymbolTable symTab) {
         ArrayList<Tid> entryTids = new ArrayList<Tid>();
         AddressIterator entryPoints = symTab.getExternalEntryPointIterator();
@@ -460,6 +646,13 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param symTab: symbol table
+     * @return: list of external symbols
+     * 
+     * Creates a list of external symbols to add to the program term
+     */
     protected ArrayList<ExternSymbol> addExternalSymbols(SymbolTable symTab) {
         ArrayList<ExternSymbol> extSym = new ArrayList<ExternSymbol>();
         ArrayList<Symbol> externalSymbols = new ArrayList<Symbol>();
@@ -479,6 +672,14 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param sym: external symbol
+     * @return: if same symbol name in references
+     * 
+     * Checks whether the same symbol name is in the references of the current symbol.
+     * If so, the current symbol is not internally called by other functions
+     */
     protected Boolean notInReferences(Symbol sym) {
         for(Reference ref : sym.getReferences()) {
             if(funcMan.getFunctionContaining(ref.getFromAddress()) != null) {
@@ -495,7 +696,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param symbol:  External symbol
      * @return: new ExternSymbol
-     * <p>
+     * 
      * Creates an external symbol with an unique TID, a calling convention and argument objects.
      */
     protected ExternSymbol createExternSymbol(Symbol symbol) {
@@ -553,7 +754,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param param: Function parameter
      * @return: new Arg
-     * <p>
+     * 
      * Specifies if the argument is a stack variable or a register.
      */
     protected Arg specifyArg(Parameter param) {
@@ -573,7 +774,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param func: Ghidra function object
      * @return: new Sub Term
-     * <p>
+     * 
      * Creates a Sub Term with an unique TID consisting of the prefix sub and its entry address.
      */
     protected Term<Sub> createSubTerm(Function func) {
@@ -585,7 +786,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param block: Instruction block
      * @return: new Blk Term
-     * <p>
+     * 
      * Creates a Blk Term with an unique TID consisting of the prefix blk and its entry address.
      */
     protected Term<Blk> createBlkTerm(String tidAddress, String suffix) {
@@ -606,7 +807,7 @@ public class PcodeExtractor extends GhidraScript {
      * @param mnemonic:   Pcode instruction mnemonic
      * @param instrAddr:  Assembly instruction address
      * @return: new Jmp Term
-     * <p>
+     * 
      * Creates a Jmp Term with an unique TID consisting of the prefix jmp, its instruction address and the index of the pcode in the block.
      * Depending on the instruction, it either has a goto label, a goto label and a condition or a call object.
      */
@@ -627,6 +828,13 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param call: indirect call
+     * @return: direkt call or indirekt call
+     * 
+     * Checks whether the indirect call could have been resolved and casts it into a direct call
+     */
     protected Term<Jmp> checkIfCallindResolved(Term<Jmp> call) {
         if (call.getTerm().getMnemonic().equals("CALLIND")) {
             if (call.getTerm().getCall().getTarget().getIndirect() == null) {
@@ -643,7 +851,7 @@ public class PcodeExtractor extends GhidraScript {
      * @param pcodeOp:    Pcode instruction
      * @param instrAddr:  Assembly instruction address
      * @return: new Def Term
-     * <p>
+     * 
      * Creates a Def Term with an unique TID consisting of the prefix def, its instruction address and the index of the pcode in the block.
      */
     protected Term<Def> createDefTerm(int pcodeIndex, PcodeOp pcodeOp, Address instrAddr) {
@@ -661,7 +869,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param node: Varnode source for Variable
      * @return: new Variable
-     * <p>
+     * 
      * Set register name based on being a register, virtual register, constant or ram address.
      * In case it is a virtual register, prefix the name with $U.
      * In case it is a constant, remove the const prefix from the constant.
@@ -695,6 +903,14 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param var: register variable
+     * @param node: varnode containing half register
+     * @return: full register variable
+     * 
+     * Casts half registers to full registers
+     */
     protected Variable castToFullRegister(Variable var, Varnode node) {
         if(cpuArch.equals("x86_32")) {
             var.setName("EAX");
@@ -711,7 +927,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param pcodeOp: Pcode instruction
      * @return: new Epxression
-     * <p>
+     * 
      * Create an Expression using the input varnodes of the pcode instruction.
      */
     protected Expression createExpression(PcodeOp pcodeOp) {
@@ -739,6 +955,7 @@ public class PcodeExtractor extends GhidraScript {
      * @param pcodeOp:     Pcode instruction
      * @param fallThrough: fallThrough address of branch/call
      * @return: new Label
+     * 
      * Create a Label based on the branch instruction. For indirect branches and calls, it consists of a Variable, for calls of a sub TID
      * and for branches of a blk TID.
      */
@@ -768,6 +985,13 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param pcodeOp: pcode instruction
+     * @return: label depending on if indirect jump could be resolved
+     * 
+     * Either returns an address to the memory if not resolved or an address to a symbol
+     */
     protected Label handleLabelsForIndirectCalls(PcodeOp pcodeOp) {
         Tid subTid = getTargetTid(pcodeOp.getInput(0));
         if (subTid != null) {
@@ -777,6 +1001,13 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param target: target address of indirect jump
+     * @return: target id of symbol
+     * 
+     * Resolves the target id for an indirect jump
+     */
     protected Tid getTargetTid(Varnode target) {
         if (!target.isRegister() && !target.isUnique()) {
             Reference[] referenced = ghidraProgram.getReferenceManager().getReferencesFrom(target.getAddress());
@@ -797,7 +1028,7 @@ public class PcodeExtractor extends GhidraScript {
      * @param mnemonic: Pcode instruction mnemonic
      * @param pcodeOp:  Pcode instruction
      * @return: new Call
-     * <p>
+     * 
      * Creates a Call object, using a target and return Label.
      */
     protected Call createCall(Instruction instr, String mnemonic, PcodeOp pcodeOp) {
@@ -812,7 +1043,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param address: Virtual register address
      * @return: Prefixed virtual register naem
-     * <p>
+     * 
      * Prefixes virtual register with $U.
      */
     protected String renameVirtualRegister(String address) {
@@ -823,7 +1054,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param node: Register Varnode
      * @return: Register mnemonic
-     * <p>
+     * 
      * Gets register mnemonic.
      */
     protected String getRegisterMnemonic(Varnode node) {
@@ -834,7 +1065,7 @@ public class PcodeExtractor extends GhidraScript {
     /**
      * @param constant: Constant value
      * @return: Constant value without prefix
-     * <p>
+     * 
      * Removes the consts prefix from the constant.
      */
     protected String removeConstantPrefix(String constant) {
@@ -842,6 +1073,13 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param param: stack parameter
+     * @return: stack parameter without stack prefix
+     * 
+     * Removes stack prefix from stack parameter. e.g. Stack[0x4] => 0x4
+     */
     protected String removeStackPrefix(String param) {
         Matcher matcher = Pattern.compile("^Stack\\[(0x\\d)\\]$").matcher(param);
         if(matcher.find()) {
