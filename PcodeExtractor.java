@@ -110,11 +110,6 @@ public class PcodeExtractor extends GhidraScript {
     protected Term<Program> iterateFunctions(SimpleBlockModel simpleBM, Listing listing) {
         FunctionIterator functions = funcMan.getFunctionsNoStubs(true);
         for (Function func : functions) {
-            if(func.getName().equals("testfunc")) {
-                for(Varnode node : func.getReturn().getVariableStorage().getVarnodes()) {
-                    println(String.format("RETURN PARAMETER: %s", context.getRegister(node).getName()));
-                }
-            }
             if (!func.isThunk()) {
                 Term<Sub> currentSub = createSubTerm(func);
                 currentSub.getTerm().setBlocks(iterateBlocks(currentSub, simpleBM, listing));
