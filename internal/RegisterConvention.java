@@ -1,10 +1,11 @@
+
 package internal;
 
 import java.util.ArrayList;
 
 import com.google.gson.annotations.SerializedName;
 
-public class RegisterCallingConvention {
+public class RegisterConvention {
 
     @SerializedName("calling_convention")
     private String cconv;
@@ -17,14 +18,14 @@ public class RegisterCallingConvention {
     @SerializedName("killed_by_call_register")
     private ArrayList<String> killedByCall;
 
-    public RegisterCallingConvention() {
+    public RegisterConvention() {
         this.setParameter(new ArrayList<String>());
         this.setReturn(new ArrayList<String>());
         this.setUnaffected(new ArrayList<String>());
         this.setKilledByCall(new ArrayList<String>());
     }
 
-    public RegisterCallingConvention(String cconv, ArrayList<String> parameter, ArrayList<String> return_, ArrayList<String> unaffected, ArrayList<String> killedByCall) {
+    public RegisterConvention(String cconv, ArrayList<String> parameter, ArrayList<String> return_, ArrayList<String> unaffected, ArrayList<String> killedByCall) {
         this.setCconv(cconv);
         this.setParameter(parameter);
         this.setReturn(return_);

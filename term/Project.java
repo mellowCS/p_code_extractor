@@ -1,7 +1,7 @@
 package term;
 
 import bil.Variable;
-import internal.RegisterCallingConvention;
+import internal.RegisterConvention;
 
 import java.util.ArrayList;
 
@@ -14,17 +14,17 @@ public class Project {
     private Variable stackPointerRegister;
     @SerializedName("cpu_architecture")
     private String cpuArch;
-    @SerializedName("register_calling_convetion")
-    private ArrayList<RegisterCallingConvention> conventions;
+    @SerializedName("register_calling_convention")
+    private ArrayList<RegisterConvention> conventions;
 
     public Project() {
     }
 
-    public Project(Term<Program> program, String cpuArch, Variable stackPointerRegister, ArrayList<RegisterCallingConvention> conventions) {
+    public Project(Term<Program> program, String cpuArch, Variable stackPointerRegister, ArrayList<RegisterConvention> conventions) {
         this.setProgram(program);
         this.setCpuArch(cpuArch);
         this.setStackPointerRegister(stackPointerRegister);
-        this.setRegisterCallingConvention(conventions);
+        this.setRegisterConvention(conventions);
     }
 
     public Term<Program> getProgram() {
@@ -51,11 +51,11 @@ public class Project {
         this.cpuArch = cpuArch;
     }
 
-    public ArrayList<RegisterCallingConvention> gRegisterCallingConvention() {
+    public ArrayList<RegisterConvention> getRegisterConvention() {
         return conventions;
     }
 
-    public void setRegisterCallingConvention(ArrayList<RegisterCallingConvention> conventions) {
+    public void setRegisterConvention(ArrayList<RegisterConvention> conventions) {
         this.conventions = conventions;
     }
 }

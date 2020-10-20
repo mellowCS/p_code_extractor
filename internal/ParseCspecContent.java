@@ -1,3 +1,5 @@
+package internal;
+
 /**
  * Most of the code below was inspired by Ghidra's source code at
  *     Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/lang/BasicCompilerSpec.java,
@@ -11,8 +13,6 @@
  * If the correct .cpsec file was found, it iterates over the XML DOM to extract the above mentioned registers.
  * 
  */
-
-package internal;
 
 import ghidra.xml.*;
 
@@ -32,8 +32,7 @@ import ghidra.program.model.lang.LanguageID;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
-public class ParseCompilerSpec {
-
+public class ParseCspecContent {
     private static Exception parseException;
     private static LanguageID languageId;
     private static CompilerSpecID compilerSpecId;
@@ -47,7 +46,7 @@ public class ParseCompilerSpec {
      * 
      * Set the important parameters and handle the file extraction and parsing
      */
-    public static void parseCompilerSpecs(Program ghidraProgram, HashMap<String, RegisterCallingConvention> conventions) throws FileNotFoundException {
+    public static void parseSpecs(Program ghidraProgram, HashMap<String, RegisterConvention> conventions) throws FileNotFoundException {
         program = ghidraProgram;
         languageId = program.getLanguageID();
         compilerSpecId = program.getCompilerSpec().getCompilerSpecID();
@@ -240,7 +239,7 @@ public class ParseCompilerSpec {
      * 
      * Searches the .cspec file for default_proto or prototype wrapper
      */
-    public static void parseCspecFile(XmlPullParser parser, HashMap<String, RegisterCallingConvention> conventions) {
+    public static void parseCspecFile(XmlPullParser parser, HashMap<String, RegisterConvention> conventions) {
         parser.start("compiler_spec");
         while(parser.peek().isStart()) {
             String field = parser.peek().getName();
@@ -264,8 +263,8 @@ public class ParseCompilerSpec {
      * is an additional wrapper around the default prototype. Therefore,
      * the function has to go one level deeper.
      */
-    public static void parsePrototype(XmlPullParser parser, String name, HashMap<String, RegisterCallingConvention> conventions) {
-        RegisterCallingConvention convention = new RegisterCallingConvention();
+    public static void parsePrototype(XmlPullParser parser, String name, HashMap<String, RegisterConvention> conventions) {
+        RegisterConvention convention = new RegisterConvention();
         if(name.equals("default_proto")) {
             parser.start();
             getUnaffectedKilledByCallAndOutput(parser, convention);
@@ -287,7 +286,7 @@ public class ParseCompilerSpec {
      * 
      * Sets the convention's unaffected, killed by call and return registers as well as the calling convention
      */
-    public static void getUnaffectedKilledByCallAndOutput(XmlPullParser parser, RegisterCallingConvention convention) {
+    public static void getUnaffectedKilledByCallAndOutput(XmlPullParser parser, RegisterConvention convention) {
         XmlElement protoElement = parser.start();
         String cconv = protoElement.getAttribute("name");
         convention.setCconv(cconv);
