@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import java.util.concurrent.TimeUnit;
 
@@ -58,6 +59,7 @@ public class PcodeExtractor extends GhidraScript {
 
     Term<Program> program = null;
     FunctionManager funcMan;
+    HashMap<String, Integer> functionEntryPoints;
     ghidra.program.model.listing.Program ghidraProgram;
     VarnodeContext context;
     String cpuArch;
@@ -81,6 +83,8 @@ public class PcodeExtractor extends GhidraScript {
         cpuArch = getCpuArchitecture();
 
         program = createProgramTerm();
+        functionEntryPoints = new HashMap<String, Integer>();
+        setFunctionEntryPoints();
         Project project = createProject();
         program = iterateFunctions(simpleBM, listing);
 
@@ -89,6 +93,21 @@ public class PcodeExtractor extends GhidraScript {
         ser.serializeProject();
         TimeUnit.SECONDS.sleep(3);
 
+    }
+
+    
+    protected void setFunctionEntryPoints() {
+        // Add external symbols and internal function addresses to hash map
+        int funcCounter = 0;
+        for(ExternSymbol sym : program.getTerm().getExternSymbols()){
+            functionEntryPoints.put(sym.getAddress(), funcCounter);
+            funcCounter++;
+        }
+        funcCounter++;
+        for(Function func : funcMan.getFunctionsNoStubs(true)) {
+            functionEntryPoints.put(func.getEntryPoint().toString(), funcCounter);
+            funcCounter++;
+        }
     }
 
 
@@ -255,10 +274,15 @@ public class PcodeExtractor extends GhidraScript {
      * Checks whether the assembly instruction is a nop instruction and adds a jump to the block.
      * Checks whether a jump occured within a ghidra generated pcode block and fixes the control flow
      * by adding missing jumps between artificially generated blocks.
+     * Checks whether an instruction is in a delay slot and, if so, ignores it 
+     * as Ghidra already includes the instruction before the jump
      */
     protected void analysePcodeBlockOfAssemblyInstruction() {
         PcodeBlockData.ops = PcodeBlockData.instruction.getPcode(true);
-        if(PcodeBlockData.ops.length == 0 && !PcodeBlockData.instruction.isInDelaySlot()) {
+        if(PcodeBlockData.instruction.isInDelaySlot()) {
+            return;
+        }
+        if(PcodeBlockData.ops.length == 0) {
             addJumpToCurrentBlock(PcodeBlockData.blocks.get(PcodeBlockData.blocks.size()-1).getTerm(), PcodeBlockData.instruction.getAddress().toString(), PcodeBlockData.instruction.getFallThrough().toString(), null);
             if(PcodeBlockData.instructionIndex < PcodeBlockData.numberOfInstructionsInBlock - 1) {
                 PcodeBlockData.blocks.add(createBlkTerm(PcodeBlockData.instruction.getFallThrough().toString(), null));
@@ -985,22 +1009,11 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
-    /**
-     * 
-     * @param target: target address of indirect jump
-     * @return: target id of symbol
-     * 
-     * Resolves the target id for an indirect jump
-     */
     protected Tid getTargetTid(Varnode target) {
-        if (!target.isRegister() && !target.isUnique()) {
-            Reference[] referenced = ghidraProgram.getReferenceManager().getReferencesFrom(target.getAddress());
-            if(referenced.length != 0) {
-                for (ExternSymbol symbol : program.getTerm().getExternSymbols()) {
-                    if (symbol.getAddress().equals(referenced[0].getToAddress().toString())) {
-                        return symbol.getTid();
-                    }
-                }
+        Address[] flowDestinations = PcodeBlockData.instruction.getFlows();
+        for(Address flow : flowDestinations) {
+            if(functionEntryPoints.containsKey(flow.toString())){
+                return new Tid(String.format("sub_%s", flow.toString()), flow.toString());
             }
         }
         return null;
