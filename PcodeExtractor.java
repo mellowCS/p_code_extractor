@@ -3,6 +3,7 @@ import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -41,6 +42,7 @@ import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
 import ghidra.program.model.symbol.SymbolType;
 import ghidra.program.model.symbol.Reference;
+import ghidra.program.model.symbol.SourceType;
 import ghidra.program.util.VarnodeContext;
 import ghidra.util.exception.CancelledException;
 
@@ -59,7 +61,7 @@ public class PcodeExtractor extends GhidraScript {
 
     Term<Program> program = null;
     FunctionManager funcMan;
-    HashMap<String, Integer> functionEntryPoints;
+    HashMap<String, Tid> functionEntryPoints;
     ghidra.program.model.listing.Program ghidraProgram;
     VarnodeContext context;
     String cpuArch;
@@ -83,7 +85,7 @@ public class PcodeExtractor extends GhidraScript {
         cpuArch = getCpuArchitecture();
 
         program = createProgramTerm();
-        functionEntryPoints = new HashMap<String, Integer>();
+        functionEntryPoints = new HashMap<String, Tid>();
         setFunctionEntryPoints();
         Project project = createProject();
         program = iterateFunctions(simpleBM, listing);
@@ -97,16 +99,14 @@ public class PcodeExtractor extends GhidraScript {
 
     
     protected void setFunctionEntryPoints() {
-        // Add external symbols and internal function addresses to hash map
-        int funcCounter = 0;
         for(ExternSymbol sym : program.getTerm().getExternSymbols()){
-            functionEntryPoints.put(sym.getAddress(), funcCounter);
-            funcCounter++;
+            for(String address : sym.getAddresses()) {
+                functionEntryPoints.put(address, sym.getTid());
+            }
         }
-        funcCounter++;
         for(Function func : funcMan.getFunctionsNoStubs(true)) {
-            functionEntryPoints.put(func.getEntryPoint().toString(), funcCounter);
-            funcCounter++;
+            String address = func.getEntryPoint().toString();
+            functionEntryPoints.put(func.getEntryPoint().toString(), new Tid(String.format("sub_%s", address), address));
         }
     }
 
@@ -657,38 +657,34 @@ public class PcodeExtractor extends GhidraScript {
      * Creates a list of external symbols to add to the program term
      */
     protected ArrayList<ExternSymbol> addExternalSymbols(SymbolTable symTab) {
-        ArrayList<ExternSymbol> extSym = new ArrayList<ExternSymbol>();
-        ArrayList<Symbol> externalSymbols = new ArrayList<Symbol>();
-        ArrayList<Symbol> definedSymbols = new ArrayList<Symbol>();
-        symTab.getExternalSymbols().forEachRemaining(externalSymbols::add);
-        symTab.getDefinedSymbols().forEachRemaining(definedSymbols::add);
-        for(Symbol def : definedSymbols) {
-            for(Symbol ext : externalSymbols) {
-                if(def.getName().equals(ext.getName()) && !def.getAddress().toString().startsWith("EXTERNAL:") && def.getSymbolType() == SymbolType.FUNCTION && notInReferences(def)) {
-                    extSym.add(createExternSymbol(def));
-                    break;
+        HashMap<String, ArrayList<Function>> externSymbolMap = new HashMap<String, ArrayList<Function>>();
+        ArrayList<String> externalSymbols = new ArrayList<String>();
+        symTab.getExternalSymbols().forEachRemaining(ext -> externalSymbols.add(ext.getName()));
+        funcMan.getFunctions(true).forEachRemaining(func -> {
+            if(externalSymbols.stream().anyMatch(ext -> ext.equals(func.getName())) && !func.getEntryPoint().isExternalAddress()) {
+                if(externSymbolMap.containsKey(func.getName())) {
+                    externSymbolMap.get(func.getName()).add(func);
+                } else {
+                    externSymbolMap.put(func.getName(), new ArrayList<Function>(){{add(func);}});
                 }
             }
-        }
+        });
 
-        return extSym;
+        return createExternSymbols(externSymbolMap);
     }
 
 
     /**
      * 
-     * @param sym: external symbol
-     * @return: if same symbol name in references
+     * @param func: external function
+     * @return: if calling function has same name
      * 
-     * Checks whether the same symbol name is in the references of the current symbol.
-     * If so, the current symbol is not internally called by other functions
+     * Checks whether the same function name is in the calling functions of the current function.
      */
-    protected Boolean notInReferences(Symbol sym) {
-        for(Reference ref : sym.getReferences()) {
-            if(funcMan.getFunctionContaining(ref.getFromAddress()) != null) {
-                if(funcMan.getFunctionContaining(ref.getFromAddress()).getName().equals(sym.getName())) {
-                    return false;
-                }
+    protected Boolean notInReferences(Function func) {
+        for(Function calling : func.getCallingFunctions(getMonitor())) {
+            if(calling.getName().equals(func.getName())) {
+                return false;
             }
         }
 
@@ -697,16 +693,28 @@ public class PcodeExtractor extends GhidraScript {
 
 
     /**
-     * @param symbol:  External symbol
-     * @return: new ExternSymbol
+     * @param symbol: External symbol
+     * @return: new ExternSymbols
      * 
-     * Creates an external symbol with an unique TID, a calling convention and argument objects.
+     * Creates external symbols with an unique TID, a calling convention and argument objects.
      */
-    protected ExternSymbol createExternSymbol(Symbol symbol) {
-        Tid tid = new Tid(String.format("sub_%s", symbol.getAddress().toString()), symbol.getAddress().toString());
-        ArrayList<Arg> args = createArguments(symbol);
-        Boolean noReturn = funcMan.getFunctionAt(symbol.getAddress()).hasNoReturn();
-        return new ExternSymbol(tid, symbol.getAddress().toString(), symbol.getName(), funcMan.getDefaultCallingConvention().getName(), args, noReturn);
+    protected ArrayList<ExternSymbol> createExternSymbols(HashMap<String, ArrayList<Function>> externSymbolMap) {
+        ArrayList<ExternSymbol> externSymbols = new ArrayList<ExternSymbol>();
+        for(Map.Entry<String, ArrayList<Function>> functions : externSymbolMap.entrySet()) {
+            ExternSymbol extSym = new ExternSymbol();
+            for(Function func : functions.getValue()) {
+                if(notInReferences(func)) {
+                    extSym.setTid(new Tid(String.format("sub_%s", func.getEntryPoint().toString()), func.getEntryPoint().toString()));
+                    extSym.setName(func.getName());
+                    extSym.setNoReturn(func.hasNoReturn());
+                    extSym.setArguments(createArguments(func));
+                }
+                extSym.getAddresses().add(func.getEntryPoint().toString());
+            }
+            externSymbols.add(extSym);
+        }
+
+        return externSymbols;
 
     }
 
@@ -734,14 +742,13 @@ public class PcodeExtractor extends GhidraScript {
 
 
     /**
-     * @param symbol:  Symbol used to get corresponding function
+     * @param func: function to get arguments
      * @return: new Arg ArrayList
      * 
      * Creates Arguments for the ExternSymbol object.
      */
-    protected ArrayList<Arg> createArguments(Symbol symbol) {
+    protected ArrayList<Arg> createArguments(Function func) {
         ArrayList<Arg> args = new ArrayList<Arg>();
-        Function func = funcMan.getFunctionAt(symbol.getAddress());
         Parameter[] params = func.getParameters();
         for (Parameter param : params) {
             args.add(specifyArg(param));
@@ -810,8 +817,7 @@ public class PcodeExtractor extends GhidraScript {
      * Creates a Sub Term with an unique TID consisting of the prefix sub and its entry address.
      */
     protected Term<Sub> createSubTerm(Function func) {
-        Tid subTid = new Tid(String.format("sub_%s", func.getEntryPoint().toString()), func.getEntryPoint().toString());
-        return new Term<Sub>(subTid, new Sub(func.getName(), func.getBody()));
+        return new Term<Sub>(functionEntryPoints.get(func.getEntryPoint().toString()), new Sub(func.getName(), func.getBody()));
     }
 
 
@@ -1011,9 +1017,10 @@ public class PcodeExtractor extends GhidraScript {
 
     protected Tid getTargetTid(Varnode target) {
         Address[] flowDestinations = PcodeBlockData.instruction.getFlows();
-        for(Address flow : flowDestinations) {
-            if(functionEntryPoints.containsKey(flow.toString())){
-                return new Tid(String.format("sub_%s", flow.toString()), flow.toString());
+        if(flowDestinations.length == 1) {
+            String flow = flowDestinations[0].toString();
+            if(functionEntryPoints.containsKey(flow)){
+                return functionEntryPoints.get(flow);
             }
         }
         return null;
@@ -1078,7 +1085,7 @@ public class PcodeExtractor extends GhidraScript {
      * Removes stack prefix from stack parameter. e.g. Stack[0x4] => 0x4
      */
     protected String removeStackPrefix(String param) {
-        Matcher matcher = Pattern.compile("^Stack\\[(0x(\\w|\\d))\\]$").matcher(param);
+        Matcher matcher = Pattern.compile("^Stack\\[([a-zA-Z0-9]*)\\]$").matcher(param);
         if(matcher.find()) {
             return matcher.group(1);
         }
