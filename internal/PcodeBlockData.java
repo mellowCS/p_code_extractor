@@ -23,7 +23,7 @@ public final class PcodeBlockData {
      */
     public static ArrayList<Term<Blk>> blocks;
     /**
-     * The PcodeOp array contains the pcode operations for one assembly instruction
+     * The PcodeOp array contains the pcode operations for the current assembly instruction
      */
     public static PcodeOp[] ops;
     /**
@@ -39,6 +39,14 @@ public final class PcodeBlockData {
      * Contains the index of the currently analysed assembly instruction in the current Ghidra block
      */
     public static int instructionIndex;
+    /**
+     * contains the current processed pcodeOp of the current assembly instruction.
+     */
+    public static PcodeOp pcodeOp;
+    /**
+     * Contains the index of the current pcodeOp of the current assembly instruction.
+     */
+    public static int pcodeIndex;
     /**
      * Contains the number of assembly instructions in the current Ghidra block
      */
