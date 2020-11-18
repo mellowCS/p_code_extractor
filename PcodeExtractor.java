@@ -14,6 +14,7 @@ import org.apache.commons.lang3.EnumUtils;
 import bil.*;
 import term.*;
 import internal.*;
+import internal.PcodeBlockData;
 import symbol.ExternSymbol;
 import serializer.Serializer;
 import ghidra.app.script.GhidraScript;
@@ -316,15 +317,16 @@ public class PcodeExtractor extends GhidraScript {
     protected Boolean iteratePcode() {
         int numberOfPcodeOps = PcodeBlockData.ops.length;
         Boolean intraInstructionJumpOccured = false;
-        for(int pcodeIndex = 0; pcodeIndex < numberOfPcodeOps; pcodeIndex++) {
-            PcodeBlockData.pcodeIndex = pcodeIndex;
-            PcodeBlockData.pcodeOp = PcodeBlockData.ops[pcodeIndex];
+        PcodeBlockData.pcodeIndex = 0;
+        for(PcodeOp op : PcodeBlockData.ops) {
+            PcodeBlockData.pcodeOp = op;
             String mnemonic = PcodeBlockData.pcodeOp.getMnemonic();
             if (this.jumps.contains(mnemonic) || PcodeBlockData.pcodeOp.getOpcode() == PcodeOp.UNIMPLEMENTED) {
                 intraInstructionJumpOccured = processJump(mnemonic, numberOfPcodeOps, intraInstructionJumpOccured);
             } else {
                 PcodeBlockData.temporaryDefStorage.add(createDefTerm());
             }
+            PcodeBlockData.pcodeIndex++;
         }
 
         return intraInstructionJumpOccured;
@@ -482,13 +484,12 @@ public class PcodeExtractor extends GhidraScript {
             currentBlock.addMultipleJumps(createJmpTerm(true));
         }
         // Create block for the pcode instructions after the intra jump !Not for the next assembly instruction!
-        // Check whether the number of jumps is equal to 2, i.e. a pair of CBRANCH, BRANCH. If so, increase the pcodeIndex by 1
+        // Check whether the number of jumps is equal to 2, i.e. a pair of CBRANCH, BRANCH was created. If so, increase the pcodeIndex by 1
         // so that the next intr block has the correct index.
         if(PcodeBlockData.blocks.get(PcodeBlockData.blocks.size() - 1).getTerm().getJmps().size() == 2) {
             PcodeBlockData.pcodeIndex +=1;
         }
-        PcodeBlockData.pcodeIndex +=1;
-        PcodeBlockData.blocks.add(createBlkTerm(PcodeBlockData.instruction.getAddress().toString(), String.valueOf(PcodeBlockData.pcodeIndex)));
+        PcodeBlockData.blocks.add(createBlkTerm(PcodeBlockData.instruction.getAddress().toString(), String.valueOf(PcodeBlockData.pcodeIndex + 1)));
         
     }
 
@@ -500,7 +501,14 @@ public class PcodeExtractor extends GhidraScript {
      * checks whether the current pcode instruction is a call
      */
     protected Boolean isCall(){
-        return (PcodeBlockData.pcodeOp.getOpcode() == PcodeOp.CALL || PcodeBlockData.pcodeOp.getOpcode() == PcodeOp.CALLIND || PcodeBlockData.pcodeOp.getOpcode() == PcodeOp.CALLOTHER);
+        switch(PcodeBlockData.pcodeOp.getOpcode()) {
+            case PcodeOp.CALL:
+            case PcodeOp.CALLIND:
+            case PcodeOp.CALLOTHER:
+                return true;
+            default:
+                return false;
+        }
     }
 
 
@@ -513,7 +521,11 @@ public class PcodeExtractor extends GhidraScript {
         // If an assembly instruction's pcode block is split into multiple blocks, the blocks' TIDs have to be distinguished by pcode index as they share the same instruction address
         if(PcodeBlockData.temporaryDefStorage.size() > 0) {
             int nextBlockStartIndex = PcodeBlockData.temporaryDefStorage.get(0).getTerm().getPcodeIndex();
-            newBlock = createBlkTerm(PcodeBlockData.instruction.getAddress().toString(), String.valueOf(nextBlockStartIndex));
+            if(nextBlockStartIndex == 0) {
+                newBlock = createBlkTerm(PcodeBlockData.instruction.getAddress().toString(), null);
+            } else {
+                newBlock = createBlkTerm(PcodeBlockData.instruction.getAddress().toString(), String.valueOf(nextBlockStartIndex));
+            }
         } else {
             newBlock = createBlkTerm(PcodeBlockData.instruction.getAddress().toString(), null);
         }
@@ -904,6 +916,17 @@ public class PcodeExtractor extends GhidraScript {
     }
 
 
+    /**
+     * 
+     * @param conditionalTid: jump site TID for CBRANCH
+     * @param intraJump: indicator if jump is an intra instruction jump
+     * @return: a pair of CBRANCH BRANCH jmp terms
+     * 
+     * Creates jmp terms for for a cbranch and an artificial fallthrough branch.
+     * It checks whether the CBRANCH occured inside a pcode block. If so, the target TID for
+     * the fall through BRANCH is set to the artificially generated block at the same address with
+     * the start pcode index of the next block.
+     */
     protected ArrayList<Term<Jmp>> handleConditionalBranches(Tid conditionalTid, Boolean intraJump) {
         ArrayList<Term<Jmp>> branches = new ArrayList<Term<Jmp>>();
         String branchSiteAddress = new String(conditionalTid.getAddress());
